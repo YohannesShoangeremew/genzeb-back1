@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -16,11 +17,20 @@ type Client struct {
 
 // NewClient creates a new Redis client
 func NewClient(cfg *config.Config) (*Client, error) {
-	rdb := redis.NewClient(&redis.Options{
+	opts := &redis.Options{
 		Addr:     cfg.Redis.GetAddr(),
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,
-	})
+	}
+
+	// Enable TLS for remote Redis hosts (required by Upstash)
+	if cfg.Redis.Host != "localhost" && cfg.Redis.Host != "127.0.0.1" {
+		opts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	rdb := redis.NewClient(opts)
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
