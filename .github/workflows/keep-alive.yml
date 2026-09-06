@@ -1,0 +1,28 @@
+name: keep-alive
+
+# Keeps the Render free-tier backend from sleeping (it spins down after ~15 min
+# idle and then cold-starts for 15-50s, which made the Telegram bot feel dead on
+# the first /start). This pings /health on a schedule so the service stays warm.
+#
+# Public repo → GitHub Actions minutes are free/unlimited, so a 10-min cadence is
+# fine. Note: GitHub may delay scheduled runs under load, so each run pings a few
+# times to widen coverage. Scheduled workflows run only on the default branch and
+# are auto-disabled after ~60 days with no repo activity.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend /health
+        run: |
+          URL="https://bingo-api-c6un.onrender.com/health"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL" || echo "000")
+            echo "ping $i -> HTTP $code"
+            if [ "$i" -lt 3 ]; then sleep 90; fi
+          done

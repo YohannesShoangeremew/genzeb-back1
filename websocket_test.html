@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebSocket Connection Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+      }
+      .input-group {
+        margin: 15px 0;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #555;
+      }
+      input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        margin: 10px 5px;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .disconnect {
+        background: #dc3545;
+      }
+      .disconnect:hover {
+        background: #c82333;
+      }
+      #status {
+        padding: 15px;
+        margin: 20px 0;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+      .status-connected {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status-disconnected {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .status-connecting {
+        background: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+      #messages {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 15px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 12px;
+      }
+      .message {
+        margin: 5px 0;
+        padding: 8px;
+        background: white;
+        border-left: 3px solid #007bff;
+        border-radius: 2px;
+      }
+      .message.error {
+        border-left-color: #dc3545;
+        background: #fff5f5;
+      }
+      .message.success {
+        border-left-color: #28a745;
+        background: #f0fff4;
+      }
+      .timestamp {
+        color: #666;
+        font-size: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🔌 WebSocket Connection Test</h1>
+      <p>Test WebSocket connection to your Railway backend</p>
+
+      <div class="input-group">
+        <label for="backendUrl">Backend URL:</label>
+        <input
+          type="text"
+          id="backendUrl"
+          value="https://web-production-201fa.up.railway.app"
+          placeholder="https://your-backend.railway.app"
+        />
+      </div>
+
+      <div class="input-group">
+        <label for="gameType">Game Type (G1-G7) or Game ID (UUID):</label>
+        <input type="text" id="gameType" placeholder="G5" value="G5" />
+        <small style="color: #666; display: block; margin-top: 5px">
+          Enter game type (G1, G2, G3, G4, G5, G6, G7) for public viewing, or
+          UUID for specific game
+        </small>
+      </div>
+
+      <div>
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button
+          id="disconnectBtn"
+          class="disconnect"
+          onclick="disconnect()"
+          disabled
+        >
+          Disconnect
+        </button>
+        <button onclick="clearMessages()">Clear Messages</button>
+      </div>
+
+      <div id="status" class="status-disconnected">Disconnected</div>
+
+      <h3>Messages:</h3>
+      <div id="messages"></div>
+    </div>
+
+    <script>
+      let ws = null;
+      const backendUrlInput = document.getElementById("backendUrl");
+      const gameTypeInput = document.getElementById("gameType");
+      const statusDiv = document.getElementById("status");
+      const messagesDiv = document.getElementById("messages");
+      const connectBtn = document.getElementById("connectBtn");
+      const disconnectBtn = document.getElementById("disconnectBtn");
+
+      function addMessage(message, type = "info") {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${type}`;
+        const timestamp = new Date().toLocaleTimeString();
+        messageDiv.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+        messagesDiv.appendChild(messageDiv);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }
+
+      function updateStatus(status, className) {
+        statusDiv.textContent = status;
+        statusDiv.className = `status-${className}`;
+      }
+
+      function connect() {
+        const backendUrl = backendUrlInput.value.trim().replace(/\/+$/, "");
+        const gameTypeOrId = gameTypeInput.value.trim();
+
+        if (!backendUrl || !gameTypeOrId) {
+          addMessage("Please fill in backend URL and game type/ID", "error");
+          return;
+        }
+
+        // Check if it's a game type (G1-G7) or game ID (UUID)
+        const isGameType = /^G[1-7]$/.test(gameTypeOrId);
+        const wsProtocol = backendUrl.startsWith("https://")
+          ? "wss://"
+          : "ws://";
+        const wsBase = backendUrl.replace(/^https?:\/\//, wsProtocol);
+        const wsUrl =
+          wsBase +
+          (isGameType
+            ? `/api/v1/ws/game?type=${gameTypeOrId}`
+            : `/api/v1/ws/game/${gameTypeOrId}`);
+
+        addMessage(`Connecting to: ${wsUrl}`, "info");
+        updateStatus("Connecting...", "connecting");
+        connectBtn.disabled = true;
+
+        try {
+          ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            addMessage("✅ WebSocket connected successfully!", "success");
+            updateStatus("Connected", "connected");
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = false;
+          };
+
+          ws.onmessage = (event) => {
+            try {
+              const message = JSON.parse(event.data);
+              addMessage(
+                `📨 Received: ${JSON.stringify(message, null, 2)}`,
+                "success",
+              );
+            } catch (e) {
+              addMessage(`📨 Received (raw): ${event.data}`, "info");
+            }
+          };
+
+          ws.onerror = (error) => {
+            addMessage(`❌ WebSocket error: ${error}`, "error");
+            updateStatus("Error", "disconnected");
+          };
+
+          ws.onclose = (event) => {
+            addMessage(
+              `🔌 WebSocket closed. Code: ${event.code}, Reason: ${event.reason || "No reason provided"}`,
+              "info",
+            );
+            updateStatus("Disconnected", "disconnected");
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            ws = null;
+          };
+        } catch (error) {
+          addMessage(
+            `❌ Failed to create WebSocket: ${error.message}`,
+            "error",
+          );
+          updateStatus("Error", "disconnected");
+          connectBtn.disabled = false;
+        }
+      }
+
+      function disconnect() {
+        if (ws) {
+          ws.close();
+          addMessage("Disconnecting...", "info");
+        }
+      }
+
+      function clearMessages() {
+        messagesDiv.innerHTML = "";
+      }
+
+      // Allow Enter key to connect
+      gameTypeInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          connect();
+        }
+      });
+    </script>
+  </body>
+</html>
