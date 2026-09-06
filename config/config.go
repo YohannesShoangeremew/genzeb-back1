@@ -182,7 +182,7 @@ func Load() (*Config, error) {
 		Telegram: TelegramConfig{
 			BotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
 			WebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
-			MiniAppURL:    getEnv("TELEGRAM_MINIAPP_URL", "https://bingo-miniapp-gold.vercel.app"),
+			MiniAppURL:    getEnv("TELEGRAM_MINIAPP_URL", "https://genzeb-front1.vercel.app/"),
 			BotUsername:   getEnv("TELEGRAM_BOT_USERNAME", "GenzebBingo_Bot"),
 		},
 		PaymentVerifier: PaymentVerifierConfig{
