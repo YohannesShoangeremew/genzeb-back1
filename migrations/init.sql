@@ -149,9 +149,11 @@ END;
 $$ language 'plpgsql';
 
 -- Create triggers to automatically update updated_at
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_wallets_updated_at ON wallets;
 CREATE TRIGGER update_wallets_updated_at BEFORE UPDATE ON wallets
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -163,6 +165,9 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
+
+-- Replace the end of init.sql with this:
+DROP TRIGGER IF EXISTS update_games_updated_at ON games;
 
 CREATE TRIGGER update_games_updated_at BEFORE UPDATE ON games
     FOR EACH ROW EXECUTE FUNCTION update_games_updated_at_column();
