@@ -467,7 +467,7 @@ func (h *TelegramHandler) showInvite(chatID int64, user *domain.User) {
 		return
 	}
 	link := fmt.Sprintf("https://t.me/%s?start=ref_%s", h.botUsername, user.ReferalCode)
-	shareText := "🎯 EDL ቢንጎ ተቀላቀሉኝ! / Join me on EDL Bingo!"
+	shareText := "🎯 Genzeb ቢንጎ ተቀላቀሉኝ! / Join me on Genzeb Bingo!"
 	shareURL := "https://t.me/share/url?url=" + url.QueryEscape(link) + "&text=" + url.QueryEscape(shareText)
 
 	msg := fmt.Sprintf(
@@ -948,7 +948,7 @@ func (h *TelegramHandler) handleStart(c *gin.Context, msg *telegram.Message) {
 	}
 
 	h.reply(msg.Chat.ID,
-		"Welcome to Edl Bingo! · እንኳን ወደ እድል ቢንጎ በደህና መጡ! 🎯\n\nTo create your account, tap the button below to share your phone number.",
+		"Welcome to Genzeb Bingo! · እንኳን ወደ Genzeb ቢንጎ በደህና መጡ! 🎯\n\nTo create your account, tap the button below to share your phone number.",
 		telegram.ContactRequestKeyboard("📱 Share my phone number"))
 }
 
