@@ -216,3 +216,20 @@ func (b *Bot) AnswerCallbackQuery(callbackID, text string) error {
 	}
 	return nil
 }
+
+// MainMenuKeyboard returns a persistent reply keyboard grid.
+func MainMenuKeyboard(rows [][]string) *ReplyMarkup {
+	var keyboard [][]KeyboardButton
+	for _, row := range rows {
+		var kbRow []KeyboardButton
+		for _, btnText := range row {
+			kbRow = append(kbRow, KeyboardButton{Text: btnText})
+		}
+		keyboard = append(keyboard, kbRow)
+	}
+	return &ReplyMarkup{
+		Keyboard:       keyboard,
+		ResizeKeyboard: true,
+		IsPersistent:   true,
+	}
+}

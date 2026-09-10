@@ -929,8 +929,8 @@ func claimErrorMessage(err error) string {
 	}
 }
 
-// handleStart greets the user. If already registered, it shows the persistent
-// main menu straight away; otherwise it asks them to share their phone number.
+// handleStart greets the user. If already registered (with a phone number), it shows
+// the persistent main menu straight away; otherwise it asks them to share their phone number.
 func (h *TelegramHandler) handleStart(c *gin.Context, msg *telegram.Message) {
 	// Capture an invite code from the deep link (/start ref_<code>) so it can be
 	// applied when this person finishes registering below.
@@ -940,21 +940,27 @@ func (h *TelegramHandler) handleStart(c *gin.Context, msg *telegram.Message) {
 		}
 	}
 
-	if user, err := h.userUseCase.FindUserByTelegramID(c.Request.Context(), msg.From.ID); err == nil && user != nil {
+	// Check if user exists AND has a verified phone number registered
+	user, err := h.userUseCase.FindUserByTelegramID(c.Request.Context(), msg.From.ID)
+	if err == nil && user != nil && user.PhoneNumber != "" {
 		h.reply(msg.Chat.ID,
 			"እንኳን ደህና መጡ፣ "+user.FirstName+"! 🎉\nከታች ያለውን ማውጫ ይጠቀሙ 👇\n\nWelcome back! Use the menu below 👇",
 			h.mainMenu())
 		return
 	}
 
+	// Unregistered user or missing phone number
 	h.reply(msg.Chat.ID,
 		"Welcome to Genzeb Bingo! · እንኳን ወደ Genzeb ቢንጎ በደህና መጡ! 🎯\n\nTo create your account, tap the button below to share your phone number.",
 		telegram.ContactRequestKeyboard("📱 Share my phone number"))
 }
-
 // handleContact registers the user from their shared contact, then shows Play.
+// handleContact registers the user from their shared contact, then shows the main menu.
 func (h *TelegramHandler) handleContact(c *gin.Context, msg *telegram.Message) {
 	contact := msg.Contact
+	if contact == nil {
+		return
+	}
 
 	// Only accept the user's OWN contact, not one forwarded from someone else.
 	if contact.UserID != 0 && contact.UserID != msg.From.ID {
@@ -991,7 +997,6 @@ func (h *TelegramHandler) handleContact(c *gin.Context, msg *telegram.Message) {
 		"ምዝገባዎ ተጠናቋል! 🎉 ከታች ያለውን ማውጫ ይጠቀሙ 👇\n\nYou're all set! Use the menu below 👇",
 		h.mainMenu())
 }
-
 // reply sends a message and logs (but swallows) any send error.
 func (h *TelegramHandler) reply(chatID int64, text string, markup *telegram.ReplyMarkup) {
 	if err := h.bot.SendMessage(chatID, text, markup); err != nil {

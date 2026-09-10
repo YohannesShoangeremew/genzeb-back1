@@ -3,7 +3,7 @@
 # Test Registration Endpoint
 # Usage: ./test_registration.sh
 
-BACKEND_URL="${BACKEND_URL:-https://bingo-api-c6un.onrender.com}"
+BACKEND_URL="${BACKEND_URL:-https://genzeb-front1.vercel.app}"
 
 # /user/register is a bot-facing endpoint gated by the internal API secret.
 # Export it before running: export INTERNAL_API_SECRET="<value from Render>"
