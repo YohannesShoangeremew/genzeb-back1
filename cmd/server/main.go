@@ -56,8 +56,15 @@ func (s telegramBroadcastSender) SendMessageWithAction(chatID int64, text string
 // Both the CORS middleware and the WebSocket upgrader read from this single
 // list — the socket used to accept every origin unconditionally, which meant
 // tightening CORS still left that door open.
+
 func resolveAllowedOrigins() []string {
-	origins := []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:5174", "https://bingo-frontend-production-7ee9.up.railway.app", "https://winner.up.railway.app", "https://bingo-miniapp-gold.vercel.app", "https://bingo-frontend-azure.vercel.app"}
+	origins := []string{
+		"http://localhost:3000",
+		"http://localhost:3001",
+		"http://localhost:5173",
+		"http://localhost:5174",
+		"https://genzeb-front1.vercel.app",
+	}
 	if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
 		origins = origins[:0]
 		for _, o := range strings.Split(env, ",") {
@@ -68,6 +75,20 @@ func resolveAllowedOrigins() []string {
 	}
 	return origins
 }
+
+
+// func resolveAllowedOrigins() []string {
+// 	origins := []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:5174", "https://bingo-frontend-production-7ee9.up.railway.app", "https://winner.up.railway.app", "https://bingo-miniapp-gold.vercel.app", "https://bingo-frontend-azure.vercel.app"}
+// 	if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
+// 		origins = origins[:0]
+// 		for _, o := range strings.Split(env, ",") {
+// 			if o = strings.TrimSpace(o); o != "" {
+// 				origins = append(origins, o)
+// 			}
+// 		}
+// 	}
+// 	return origins
+// }
 
 // resolveTrustedProxies lists the networks a reverse proxy may reach this
 // service from. TRUSTED_PROXIES (comma-separated CIDRs) overrides it.
