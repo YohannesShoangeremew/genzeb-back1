@@ -93,7 +93,7 @@ services:
       # URL the bot's "Play" button opens. Defaults in code to the Vercel app;
       # override here if the frontend moves to another host.
       - key: TELEGRAM_MINIAPP_URL
-        value: https://bingo-miniapp-gold.vercel.app
+        value: https://genzeb-front1.vercel.app/
 
       # ---- Filler bots ----
       # House bankroll each filler bot is topped up to when the pool is seeded.
@@ -112,7 +112,7 @@ services:
       # other account are rejected, so a valid receipt for money sent elsewhere
       # cannot be claimed. Must match VITE_TELEBIRR_NUMBER in the miniapp.
       - key: VERIFY_TELEBIRR_ACCOUNT
-        value: "0999357708"
+        value: "0912978030"
       # House CBE Birr number and M-Pesa number, same account-binding role as
       # VERIFY_TELEBIRR_ACCOUNT for their methods. Must match VITE_CBEBIRR_NUMBER
       # / VITE_MPESA_NUMBER in the miniapp. Binding is MANDATORY for auto-approval:
@@ -121,8 +121,8 @@ services:
       # additionally NEEDS its number to look receipts up at all (the verifier
       # fetches CBE Birr receipts by receiver phone).
       - key: VERIFY_CBEBIRR_ACCOUNT
-        value: "0990878233"
+        value: "0912978030"
       - key: VERIFY_CBEBIRR_NAME
-        value: "Danasa beyene mana"
+        value: "Yohannes S"
       - key: VERIFY_MPESA_ACCOUNT
-        value: "0710132230"
+        value: "0713188040"
