@@ -49,16 +49,38 @@ func (s telegramBroadcastSender) SendMessageWithAction(chatID int64, text string
 	})
 }
 
-// resolveAllowedOrigins returns the browser origins permitted to reach this
-// API. ALLOWED_ORIGINS (comma-separated) overrides the defaults, so moving the
-// frontends to a new host is an env change, not a code change.
-//
-// Both the CORS middleware and the WebSocket upgrader read from this single
-// list — the socket used to accept every origin unconditionally, which meant
-// tightening CORS still left that door open.
+// // resolveAllowedOrigins returns the browser origins permitted to reach this
+// // API. ALLOWED_ORIGINS (comma-separated) overrides the defaults, so moving the
+// // frontends to a new host is an env change, not a code change.
+// //
+// // Both the CORS middleware and the WebSocket upgrader read from this single
+// // list — the socket used to accept every origin unconditionally, which meant
+// // tightening CORS still left that door open.
+
+// func resolveAllowedOrigins() []string {
+// 	origins := []string{
+// 		"http://localhost:3000",
+// 		"http://localhost:3001",
+// 		"http://localhost:5173",
+// 		"http://localhost:5174",
+// 		"https://genzeb-front1.vercel.app",
+// 		"https://adminmain.vercel.app",
+// 	}
+// 	if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
+// 		origins = origins[:0]
+// 		for _, o := range strings.Split(env, ",") {
+// 			if o = strings.TrimSpace(o); o != "" {
+// 				origins = append(origins, o)
+// 			}
+// 		}
+// 	}
+// 	return origins
+// }
+
 
 func resolveAllowedOrigins() []string {
-	origins := []string{
+	// 1. Hardcoded defaults that are ALWAYS allowed
+	defaults := []string{
 		"http://localhost:3000",
 		"http://localhost:3001",
 		"http://localhost:5173",
@@ -66,14 +88,38 @@ func resolveAllowedOrigins() []string {
 		"https://genzeb-front1.vercel.app",
 		"https://adminmain.vercel.app",
 	}
+
+	// Use a map to avoid duplicate origin entries
+	originMap := make(map[string]bool)
+	for _, d := range defaults {
+		originMap[d] = true
+	}
+
+	// 2. Append environment variables if provided
 	if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
-		origins = origins[:0]
 		for _, o := range strings.Split(env, ",") {
-			if o = strings.TrimSpace(o); o != "" {
-				origins = append(origins, o)
+			o = strings.TrimSpace(o)
+			o = strings.TrimSuffix(o, "/") // Strip trailing slashes
+
+			if o == "" {
+				continue
 			}
+
+			// Ensure protocol prefix exists
+			if !strings.HasPrefix(o, "http://") && !strings.HasPrefix(o, "https://") && o != "*" {
+				o = "https://" + o
+			}
+
+			originMap[o] = true
 		}
 	}
+
+	// 3. Convert map back to slice
+	origins := make([]string, 0, len(originMap))
+	for origin := range originMap {
+		origins = append(origins, origin)
+	}
+
 	return origins
 }
 
