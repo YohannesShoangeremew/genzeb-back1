@@ -64,6 +64,7 @@ func resolveAllowedOrigins() []string {
 		"http://localhost:5173",
 		"http://localhost:5174",
 		"https://genzeb-front1.vercel.app",
+		"https://adminmain.vercel.app",
 	}
 	if env := os.Getenv("ALLOWED_ORIGINS"); env != "" {
 		origins = origins[:0]
