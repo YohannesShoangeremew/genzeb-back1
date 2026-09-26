@@ -20,7 +20,7 @@ jobs:
     steps:
       - name: Ping backend /health
         run: |
-          URL="https://bingo-api-c6un.onrender.com/health"
+          URL="https://genzeb-back1.onrender.com/health"
           for i in 1 2 3; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL" || echo "000")
             echo "ping $i -> HTTP $code"
