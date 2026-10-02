@@ -15,6 +15,7 @@ import (
 	"github.com/bingo/backend/config"
 	"github.com/bingo/backend/internal/domain"
 	"github.com/bingo/backend/internal/handler"
+	"github.com/bingo/backend/internal/bot"
 	"github.com/bingo/backend/internal/middleware"
 	"github.com/bingo/backend/internal/payment"
 	"github.com/bingo/backend/internal/repository/postgres"
