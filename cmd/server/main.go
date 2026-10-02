@@ -253,6 +253,33 @@ func main() {
 	// The bot exists now, so notify a referrer after the invited player's first real deposit.
 	walletUseCase.SetReferralNotifier(telegramBroadcastSender{bot: telegramBot})
 
+
+	// =========================================================
+	// Agent Bot Initialization (@genzeb_Agent_bot)
+	// =========================================================
+	agentBotToken := os.Getenv("AGENT_BOT_TOKEN")
+	agentBotUsername := os.Getenv("AGENT_BOT_USERNAME")
+	if agentBotUsername == "" {
+		agentBotUsername = "genzeb_Agent_bot"
+	}
+
+	if agentBotToken != "" {
+		agentBot, err := bot.NewAgentBotService(agentBotToken, db, cfg.Telegram.BotUsername)
+		if err != nil {
+			log.Printf("[agent-bot] Warning: Failed to initialize Agent Bot: %v", err)
+		} else {
+			go func() {
+				defer utils.RecoverPanic("agent-bot-runner")
+				log.Printf("[agent-bot] Starting Agent Bot (@%s)...", agentBotUsername)
+				agentBot.Start()
+			}()
+		}
+	} else {
+		log.Println("[agent-bot] AGENT_BOT_TOKEN not provided. Skipping Agent Bot start.")
+	}
+
+
+
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userUseCase)
 	walletHandler := handler.NewWalletHandler(walletUseCase, verificationLogRepo)
