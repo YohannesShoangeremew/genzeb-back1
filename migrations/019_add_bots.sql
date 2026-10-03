@@ -38,7 +38,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS bot_config (
     id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     enabled          BOOLEAN NOT NULL DEFAULT false,     -- master auto-fill switch
-    min_real_players INTEGER NOT NULL DEFAULT 20,        -- only fill games with fewer real players than this
+    min_real_players INTEGER NOT NULL DEFAULT 2,        -- only fill games with fewer real players than this
     target_bots      INTEGER NOT NULL DEFAULT 30,        -- add bots until the game has this many
     tiers            TEXT    NOT NULL DEFAULT 'REGULAR,VIP', -- comma-separated game types to fill
     updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -47,5 +47,5 @@ CREATE TABLE IF NOT EXISTS bot_config (
 -- Seed the single row with the requested defaults (disabled until an admin turns
 -- it on). ON CONFLICT keeps this migration re-runnable.
 INSERT INTO bot_config (id, enabled, min_real_players, target_bots, tiers)
-VALUES (1, false, 20, 30, 'REGULAR,VIP')
+VALUES (1, false, 2, 30, 'REGULAR,VIP')
 ON CONFLICT (id) DO NOTHING;

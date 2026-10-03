@@ -205,7 +205,7 @@ func Load() (*Config, error) {
 			WalletFloat:     float64(getEnvInt("BOT_WALLET_FLOAT", 1_000_000)),
 			MaxJoinsPerTick: getEnvInt("BOT_MAX_JOINS_PER_TICK", 5),
 			CheckInterval:   getEnvInt("BOT_CHECK_INTERVAL_SECONDS", 5),
-			JoinDelay:       getEnvInt("BOT_JOIN_DELAY_SECONDS", 5),
+			JoinDelay:       getEnvInt("BOT_JOIN_DELAY_SECONDS", 2),
 			WinRate:         parseWinRate(getEnv("BOT_WIN_RATE", "0.8")),
 		},
 		RateLimits: RateLimitsConfig{
@@ -228,7 +228,7 @@ func Load() (*Config, error) {
 			TelegramAuthWindow: getEnvInt("RL_TELEGRAM_AUTH_WINDOW_SECONDS", 60),
 			// Per-user from here down, so these are about one account's
 			// behaviour and NAT is irrelevant.
-			DepositLimit:    getEnvInt("RL_DEPOSIT_LIMIT", 10),
+			DepositLimit:    getEnvInt("RL_DEPOSIT_LIMIT", 30),
 			DepositWindow:   getEnvInt("RL_DEPOSIT_WINDOW_SECONDS", 60),
 			WithdrawLimit:   getEnvInt("RL_WITHDRAW_LIMIT", 5),
 			WithdrawWindow:  getEnvInt("RL_WITHDRAW_WINDOW_SECONDS", 60),
