@@ -58,7 +58,7 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 	switch msg.Command() {
 	case "start":
 		text := fmt.Sprintf(
-			"👋 **Welcome to the Agent Portal!**\n\n"+
+			"👋 **Welcome to the Genzeb Agent Portal!**\n\n"+
 				"🆔 Agent Code: `%s`\n"+
 				"💰 Wallet Balance: **%.2f ETB**\n\n"+
 				"Commands:\n"+

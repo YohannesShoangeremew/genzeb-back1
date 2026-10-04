@@ -107,12 +107,12 @@ services:
       - key: VERIFY_API_KEY        # your key from verify.leul.et — secret
         sync: false
       - key: VERIFY_API_BASE_URL
-        value: https://verifyapi.leulzenebe.pro
+        value: https://verifyapi.genzeb.pro
       # House Telebirr number deposits must be paid to. Receipts credited to any
       # other account are rejected, so a valid receipt for money sent elsewhere
       # cannot be claimed. Must match VITE_TELEBIRR_NUMBER in the miniapp.
       - key: VERIFY_TELEBIRR_ACCOUNT
-        value: "0912978030"
+        value: "0966114511"
       # House CBE Birr number and M-Pesa number, same account-binding role as
       # VERIFY_TELEBIRR_ACCOUNT for their methods. Must match VITE_CBEBIRR_NUMBER
       # / VITE_MPESA_NUMBER in the miniapp. Binding is MANDATORY for auto-approval:

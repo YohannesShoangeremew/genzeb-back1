@@ -188,10 +188,10 @@ func Load() (*Config, error) {
 		PaymentVerifier: PaymentVerifierConfig{
 			BaseURL:         strings.TrimRight(getEnv("VERIFY_API_BASE_URL", "https://verifyapi.leulzenebe.pro"), "/"),
 			APIKey:          getEnv("VERIFY_API_KEY", ""),
-			TelebirrAccount: getEnv("VERIFY_TELEBIRR_ACCOUNT", "0912978030"),
+			TelebirrAccount: getEnv("VERIFY_TELEBIRR_ACCOUNT", "0966114511"),
 			CBEBirrAccount:  getEnv("VERIFY_CBEBIRR_ACCOUNT", "0912978030"),
 			MpesaAccount:    getEnv("VERIFY_MPESA_ACCOUNT", "0713188040"),
-			TelebirrName:    getEnv("VERIFY_TELEBIRR_NAME", "Yohannes S"),
+			TelebirrName:    getEnv("VERIFY_TELEBIRR_NAME", "Tigist"),
 			CBEBirrName:     getEnv("VERIFY_CBEBIRR_NAME", "Yohannes S"),
 			MpesaName:       getEnv("VERIFY_MPESA_NAME", "Yohannes S"),
 			DebugLog:        strings.EqualFold(getEnv("VERIFY_DEBUG_LOG", ""), "true"),
