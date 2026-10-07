@@ -4,28 +4,32 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type AgentBotService struct {
-	bot     *tgbotapi.BotAPI
-	db      *sql.DB
-	botName string
+	bot        *tgbotapi.BotAPI
+	db         *sql.DB
+	mainBotName string // Main Bingo Bot username (where players register)
 }
 
-func NewAgentBotService(token string, db *sql.DB, botName string) (*AgentBotService, error) {
+func NewAgentBotService(token string, db *sql.DB, mainBotName string) (*AgentBotService, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create agent bot: %w", err)
 	}
 
-	log.Printf("Agent Bot authorized as @%s", bot.Self.UserName)
+	// Sanitize mainBotName: Remove '@' if present
+	cleanMainBotName := strings.TrimPrefix(mainBotName, "@")
+
+	log.Printf("Agent Bot authorized as @%s (Targeting Main Bot: @%s)", bot.Self.UserName, cleanMainBotName)
 	return &AgentBotService{
-		bot:     bot,
-		db:      db,
-		botName: botName,
+		bot:         bot,
+		db:          db,
+		mainBotName: cleanMainBotName,
 	}, nil
 }
 
@@ -48,12 +52,15 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 	telegramID := msg.From.ID
 
 	// Verify or auto-register agent
-	agentID, refCode, balance, err := s.getOrCreateAgent(telegramID)
+	agentID, refCode, err := s.getOrCreateAgent(telegramID)
 	if err != nil {
 		s.reply(msg.Chat.ID, "❌ Account error. Please contact admin support.")
 		log.Printf("Error fetching agent %d: %v", telegramID, err)
 		return
 	}
+
+	// Always fetch live balance directly from DB
+	balance := s.getAgentBalance(agentID)
 
 	switch msg.Command() {
 	case "start":
@@ -70,7 +77,8 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 		s.replyMarkdown(msg.Chat.ID, text)
 
 	case "link":
-		link := fmt.Sprintf("https://t.me/%s?start=ref_%s", s.botName, refCode)
+		// Ensure s.mainBotName points to your MAIN player bingo bot username
+		link := fmt.Sprintf("https://t.me/%s?start=ref_%s", s.mainBotName, refCode)
 		text := fmt.Sprintf(
 			"🔗 **Your Unique Referral Link:**\n\n"+
 				"`%s`\n\n"+
@@ -90,20 +98,19 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 	}
 }
 
-func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, float64, error) {
+func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, error) {
 	var id, refCode string
-	var balance float64
 
-	// 1. Try fetching existing agent
-	query := `SELECT id, referral_code, balance FROM agents WHERE telegram_id = $1`
-	err := s.db.QueryRow(query, telegramID).Scan(&id, &refCode, &balance)
+	// 1. Fetch existing agent
+	query := `SELECT id, referral_code FROM agents WHERE telegram_id = $1`
+	err := s.db.QueryRow(query, telegramID).Scan(&id, &refCode)
 
 	if err == nil {
-		return id, refCode, balance, nil
+		return id, refCode, nil
 	}
 
 	if err != sql.ErrNoRows {
-		return "", "", 0, err
+		return "", "", err
 	}
 
 	// 2. Auto-generate referral code for new agent
@@ -111,14 +118,20 @@ func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, fl
 	insertQuery := `
 		INSERT INTO agents (telegram_id, referral_code, balance)
 		VALUES ($1, $2, 0.00)
-		RETURNING id, referral_code, balance`
+		RETURNING id, referral_code`
 
-	err = s.db.QueryRow(insertQuery, telegramID, refCode).Scan(&id, &refCode, &balance)
+	err = s.db.QueryRow(insertQuery, telegramID, refCode).Scan(&id, &refCode)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", err
 	}
 
-	return id, refCode, balance, nil
+	return id, refCode, nil
+}
+
+func (s *AgentBotService) getAgentBalance(agentID string) float64 {
+	var balance float64
+	s.db.QueryRow(`SELECT COALESCE(balance, 0.00) FROM agents WHERE id = $1`, agentID).Scan(&balance)
+	return balance
 }
 
 func (s *AgentBotService) handleStats(chatID int64, agentID string) {
@@ -126,7 +139,7 @@ func (s *AgentBotService) handleStats(chatID int64, agentID string) {
 	var todayCommissions float64
 	var lifetimeCommissions float64
 
-	// Count real referred players (ignoring filler bots)
+	// Count referred real players
 	s.db.QueryRow(`
 		SELECT COUNT(*) FROM users 
 		WHERE agent_id = $1 AND is_bot = false`, agentID,
@@ -155,20 +168,17 @@ func (s *AgentBotService) handleStats(chatID int64, agentID string) {
 }
 
 func (s *AgentBotService) handleWithdrawRequest(chatID int64, agentID string, balance float64) {
-	// Rule 1: Weekly payout check (e.g., Sunday-only withdrawals)
 	if time.Now().Weekday() != time.Sunday {
 		s.reply(chatID, "🗓 Withdrawals are only processed on Sundays. Please check back then!")
 		return
 	}
 
-	// Rule 2: Minimum balance check
 	minWithdrawal := 100.00
 	if balance < minWithdrawal {
 		s.reply(chatID, fmt.Sprintf("⚠️ Minimum withdrawal is %.2f ETB. Your current balance is %.2f ETB.", minWithdrawal, balance))
 		return
 	}
 
-	// Begin atomic transaction to place withdrawal in pending status
 	tx, err := s.db.Begin()
 	if err != nil {
 		s.reply(chatID, "❌ Processing error. Please try again later.")
@@ -176,14 +186,12 @@ func (s *AgentBotService) handleWithdrawRequest(chatID int64, agentID string, ba
 	}
 	defer tx.Rollback()
 
-	// Deduct balance
 	_, err = tx.Exec(`UPDATE agents SET balance = balance - $1 WHERE id = $2`, balance, agentID)
 	if err != nil {
 		s.reply(chatID, "Failed to create withdrawal request.")
 		return
 	}
 
-	// Log transaction category as 'agent_payout'
 	_, err = tx.Exec(`
 		INSERT INTO transactions (id, user_id, type, category, amount, status)
 		VALUES (gen_random_uuid(), NULL, 'withdrawal', 'agent_payout', $1, 'pending')`,
