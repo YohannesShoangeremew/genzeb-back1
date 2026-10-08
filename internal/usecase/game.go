@@ -844,7 +844,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		return
 	}
 
-	// Charge each player for their reserved (unpaid) cards, all at once.
 	unpaidByUser := map[uuid.UUID]int{}
 	for _, p := range active {
 		if !p.Paid {
@@ -854,6 +853,14 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 
 	gameBetRef := "GAME_BET"
 	var droppedCards []int
+
+	// Struct to track commissions to credit AFTER card processing
+	type pendingCommission struct {
+		agentID    uuid.UUID
+		playerTgID int64
+		amount     float64
+	}
+	var commissionsToCredit []pendingCommission
 
 	for userID, count := range unpaidByUser {
 		wallet, err := uc.walletRepo.LockForUpdate(ctx, tx, userID)
@@ -877,7 +884,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		cashCards := count - bonusCards
 		cashCost := float64(cashCards) * game.BetAmount
 		if wallet.Balance < cashCost {
-			// Can't pay: release all of this player's reserved cards.
 			for _, p := range active {
 				if p.UserID == userID && !p.Paid {
 					if _, err := uc.gameRepo.RemovePlayerCard(ctx, tx, gameID, userID, p.CardID); err != nil {
@@ -903,22 +909,29 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			}
 		}
 
-		// Deduct the cash portion and record one bet transaction per card.
 		if cashCost > 0 {
 			if err := uc.walletRepo.UpdateBalance(ctx, tx, userID, -cashCost); err != nil {
 				return
 			}
 		}
 
-		// Fetch user details once per user (safe, nullable)
+		// Safe Agent Lookup
 		var agentID uuid.NullUUID
-		var playerTelegramID int64
+		var playerTelegramID sql.NullInt64
 		_ = tx.QueryRowContext(ctx, `
 			SELECT agent_id, telegram_id 
 			FROM users 
 			WHERE id = $1`, 
 			userID,
 		).Scan(&agentID, &playerTelegramID)
+
+		if agentID.Valid {
+			commissionsToCredit = append(commissionsToCredit, pendingCommission{
+				agentID:    agentID.UUID,
+				playerTgID: playerTelegramID.Int64,
+				amount:     game.BetAmount * float64(count) * 0.02, // 2% of total cards
+			})
+		}
 
 		for i := 0; i < count; i++ {
 			category := domain.TransactionCategoryBet
@@ -936,24 +949,24 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			if err := uc.transactionRepo.Create(ctx, tx, betTx); err != nil {
 				return
 			}
+		}
 
-			// AGENT COMMISSION (2% of card stake)
-			if agentID.Valid {
-				commissionAmount := game.BetAmount * 0.02
+		// Process Agent Commission safely inside the same tx
+		if agentID.Valid {
+			commAmount := game.BetAmount * float64(count) * 0.02
+			_, _ = tx.ExecContext(ctx, `
+				INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
+				ON CONFLICT DO NOTHING`,
+				agentID.UUID, playerTelegramID.Int64, gameID.String(), commAmount,
+			)
 
-				_, _ = tx.ExecContext(ctx, `
-					INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
-					agentID.UUID, playerTelegramID, gameID.String(), commissionAmount,
-				)
-
-				_, _ = tx.ExecContext(ctx, `
-					UPDATE agents 
-					SET balance = balance + $1 
-					WHERE id = $2`,
-					commissionAmount, agentID.UUID,
-				)
-			}
+			_, _ = tx.ExecContext(ctx, `
+				UPDATE agents 
+				SET balance = balance + $1 
+				WHERE id = $2`,
+				commAmount, agentID.UUID,
+			)
 		}
 
 		if _, err := uc.gameRepo.MarkUserCardsPaidTx(ctx, tx, gameID, userID); err != nil {
@@ -966,7 +979,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		}
 	}
 
-	// Recompute the live counters from the paid cards that remain.
 	paidPlayers, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
 	if err != nil {
 		return
