@@ -183,7 +183,7 @@ func Load() (*Config, error) {
 			BotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
 			WebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
 			MiniAppURL:    getEnv("TELEGRAM_MINIAPP_URL", "https://genzeb-front1.vercel.app/"),
-			BotUsername:   getEnv("TELEGRAM_BOT_USERNAME", "Genzeb_Bingobot"),
+			BotUsername:   getEnv("TELEGRAM_BOT_USERNAME", "GenzebBingo_bot"),
 		},
 		PaymentVerifier: PaymentVerifierConfig{
 			BaseURL:         strings.TrimRight(getEnv("VERIFY_API_BASE_URL", "https://verifyapi.leulzenebe.pro"), "/"),
