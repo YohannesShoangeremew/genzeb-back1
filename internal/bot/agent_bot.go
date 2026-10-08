@@ -11,8 +11,8 @@ import (
 )
 
 type AgentBotService struct {
-	bot        *tgbotapi.BotAPI
-	db         *sql.DB
+	bot         *tgbotapi.BotAPI
+	db          *sql.DB
 	mainBotName string // Main Bingo Bot username (where players register)
 }
 
@@ -22,8 +22,8 @@ func NewAgentBotService(token string, db *sql.DB, mainBotName string) (*AgentBot
 		return nil, fmt.Errorf("failed to create agent bot: %w", err)
 	}
 
-	// Sanitize mainBotName: Remove '@' if present
-	cleanMainBotName := strings.TrimPrefix(mainBotName, "@")
+	// Sanitize mainBotName: Remove '@' and spaces
+	cleanMainBotName := strings.TrimPrefix(strings.TrimSpace(mainBotName), "@")
 
 	log.Printf("Agent Bot authorized as @%s (Targeting Main Bot: @%s)", bot.Self.UserName, cleanMainBotName)
 	return &AgentBotService{
@@ -77,7 +77,7 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 		s.replyMarkdown(msg.Chat.ID, text)
 
 	case "link":
-		// Ensure s.mainBotName points to your MAIN player bingo bot username
+		// Direct deep link to main player bot
 		link := fmt.Sprintf("https://t.me/%s?start=ref_%s", s.mainBotName, refCode)
 		text := fmt.Sprintf(
 			"🔗 **Your Unique Referral Link:**\n\n"+
@@ -130,29 +130,29 @@ func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, er
 
 func (s *AgentBotService) getAgentBalance(agentID string) float64 {
 	var balance float64
-	s.db.QueryRow(`SELECT COALESCE(balance, 0.00) FROM agents WHERE id = $1`, agentID).Scan(&balance)
+	_ = s.db.QueryRow(`SELECT COALESCE(balance, 0.00) FROM agents WHERE id = $1`, agentID).Scan(&balance)
 	return balance
 }
 
 func (s *AgentBotService) handleStats(chatID int64, agentID string) {
 	var totalPlayers int
-	var todayCommissions float64
-	var lifetimeCommissions float64
+	var todayCommissions sql.NullFloat64
+	var lifetimeCommissions sql.NullFloat64
 
 	// Count referred real players
-	s.db.QueryRow(`
+	_ = s.db.QueryRow(`
 		SELECT COUNT(*) FROM users 
 		WHERE agent_id = $1 AND is_bot = false`, agentID,
 	).Scan(&totalPlayers)
 
 	// Today's commissions
-	s.db.QueryRow(`
+	_ = s.db.QueryRow(`
 		SELECT COALESCE(SUM(amount), 0.00) FROM agent_commissions 
 		WHERE agent_id = $1 AND created_at >= CURRENT_DATE`, agentID,
 	).Scan(&todayCommissions)
 
 	// Lifetime commissions
-	s.db.QueryRow(`
+	_ = s.db.QueryRow(`
 		SELECT COALESCE(SUM(amount), 0.00) FROM agent_commissions 
 		WHERE agent_id = $1`, agentID,
 	).Scan(&lifetimeCommissions)
@@ -162,17 +162,19 @@ func (s *AgentBotService) handleStats(chatID int64, agentID string) {
 			"👥 Total Players Referred: **%d**\n"+
 			"📈 Today's Earnings: **%.2f ETB**\n"+
 			"💎 Lifetime Earnings: **%.2f ETB**",
-		totalPlayers, todayCommissions, lifetimeCommissions,
+		totalPlayers, todayCommissions.Float64, lifetimeCommissions.Float64,
 	)
 	s.replyMarkdown(chatID, text)
 }
 
 func (s *AgentBotService) handleWithdrawRequest(chatID int64, agentID string, balance float64) {
+	// Rule 1: Sunday-only withdrawals check
 	if time.Now().Weekday() != time.Sunday {
 		s.reply(chatID, "🗓 Withdrawals are only processed on Sundays. Please check back then!")
 		return
 	}
 
+	// Rule 2: Minimum balance threshold
 	minWithdrawal := 100.00
 	if balance < minWithdrawal {
 		s.reply(chatID, fmt.Sprintf("⚠️ Minimum withdrawal is %.2f ETB. Your current balance is %.2f ETB.", minWithdrawal, balance))
@@ -186,19 +188,21 @@ func (s *AgentBotService) handleWithdrawRequest(chatID int64, agentID string, ba
 	}
 	defer tx.Rollback()
 
+	// Deduct balance from agent wallet
 	_, err = tx.Exec(`UPDATE agents SET balance = balance - $1 WHERE id = $2`, balance, agentID)
 	if err != nil {
-		s.reply(chatID, "Failed to create withdrawal request.")
+		s.reply(chatID, "Failed to update agent balance.")
 		return
 	}
 
+	// Log transaction linked to agent
 	_, err = tx.Exec(`
 		INSERT INTO transactions (id, user_id, type, category, amount, status)
 		VALUES (gen_random_uuid(), NULL, 'withdrawal', 'agent_payout', $1, 'pending')`,
 		balance,
 	)
 	if err != nil {
-		s.reply(chatID, "Failed to log transaction record.")
+		s.reply(chatID, "Failed to log withdrawal record.")
 		return
 	}
 
@@ -213,11 +217,11 @@ func (s *AgentBotService) handleWithdrawRequest(chatID int64, agentID string, ba
 
 func (s *AgentBotService) reply(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
-	s.bot.Send(msg)
+	_, _ = s.bot.Send(msg)
 }
 
 func (s *AgentBotService) replyMarkdown(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	s.bot.Send(msg)
+	_, _ = s.bot.Send(msg)
 }
