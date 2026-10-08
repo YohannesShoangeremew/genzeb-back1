@@ -75,80 +75,243 @@ func NewUserRepository(db *sql.DB) domain.UserRepository {
 // }
 
 
+// func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.User) error {
+//     query := `
+//         INSERT INTO users (
+//             id,
+//             telegram_id,
+//             first_name,
+//             last_name,
+//             phone_number,
+//             referal_code,
+//             role,
+//             password,
+//             is_bot,
+//             referred_by,
+//             agent_id,
+//             created_at,
+//             updated_at
+//         )
+//         VALUES (
+//             $1, $2, $3, $4, $5, $6, $7,
+//             $8, $9, $10, $11, $12, $13
+//         )
+//     `
+
+//     now := time.Now()
+//     user.CreatedAt = now
+//     user.UpdatedAt = now
+
+//     if user.ID == uuid.Nil {
+//         user.ID = uuid.New()
+//     }
+
+//     if user.Role == "" {
+//         user.Role = "user"
+//     }
+
+//     var referredBy any
+//     if user.ReferredBy != nil {
+//         referredBy = *user.ReferredBy
+//     }
+
+//     var agentID any
+//     if user.AgentID != nil {
+//         agentID = *user.AgentID
+//     }
+
+//     args := []any{
+//         user.ID,
+//         user.TelegramID,
+//         user.FirstName,
+//         user.LastName,
+//         user.PhoneNumber,
+//         user.ReferalCode,
+//         user.Role,
+//         user.Password,
+//         user.IsBot,
+//         referredBy,
+//         agentID,
+//         user.CreatedAt,
+//         user.UpdatedAt,
+//     }
+
+//     var err error
+//     if tx != nil {
+//         _, err = tx.ExecContext(ctx, query, args...)
+//     } else {
+//         _, err = r.db.ExecContext(ctx, query, args...)
+//     }
+
+//     if err != nil {
+//         return fmt.Errorf("failed to create user: %w", err)
+//     }
+
+//     return nil
+// }
+
+
+
+
+
+// func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.User) error {
+// 	query := `
+// 		INSERT INTO users (
+// 			id,
+// 			telegram_id,
+// 			first_name,
+// 			last_name,
+// 			phone_number,
+// 			referal_code,
+// 			role,
+// 			password,
+// 			is_bot,
+// 			referred_by,
+// 			agent_id,
+// 			created_at,
+// 			updated_at
+// 		)
+// 		VALUES (
+// 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+// 			(SELECT id FROM users WHERE referal_code = $10 LIMIT 1),
+// 			(SELECT id FROM agents WHERE referral_code = $10 LIMIT 1),
+// 			$11, $12
+// 		)
+// 	`
+
+// 	now := time.Now()
+// 	user.CreatedAt = now
+// 	user.UpdatedAt = now
+
+// 	if user.ID == uuid.Nil {
+// 		user.ID = uuid.New()
+// 	}
+
+// 	if user.Role == "" {
+// 		user.Role = "user"
+// 	}
+
+// 	// Read the incoming start code (e.g., "AG472568" or a P2P user code)
+// 	var refCode string
+// 	if user.ReferredBy != nil && *user.ReferredBy != uuid.Nil {
+// 		refCode = user.ReferredBy.String()
+// 	}
+
+// 	args := []any{
+// 		user.ID,
+// 		user.TelegramID,
+// 		user.FirstName,
+// 		user.LastName,
+// 		user.PhoneNumber,
+// 		user.ReferalCode,
+// 		user.Role,
+// 		user.Password,
+// 		user.IsBot,
+// 		refCode, // $10: looks up matching code in both users and agents tables
+// 		user.CreatedAt,
+// 		user.UpdatedAt,
+// 	}
+
+// 	var err error
+// 	if tx != nil {
+// 		_, err = tx.ExecContext(ctx, query, args...)
+// 	} else {
+// 		_, err = r.db.ExecContext(ctx, query, args...)
+// 	}
+
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create user: %w", err)
+// 	}
+
+// 	return nil
+// }
+
+
 func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.User) error {
-    query := `
-        INSERT INTO users (
-            id,
-            telegram_id,
-            first_name,
-            last_name,
-            phone_number,
-            referal_code,
-            role,
-            password,
-            is_bot,
-            referred_by,
-            agent_id,
-            created_at,
-            updated_at
-        )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12, $13
-        )
-    `
+	query := `
+		INSERT INTO users (
+			id,
+			telegram_id,
+			first_name,
+			last_name,
+			phone_number,
+			referal_code,
+			role,
+			password,
+			is_bot,
+			referred_by,
+			agent_id,
+			created_at,
+			updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+			COALESCE($10, (SELECT id FROM users WHERE referal_code = $11 LIMIT 1)),
+			COALESCE($12, (SELECT id FROM agents WHERE referral_code = $11 LIMIT 1)),
+			$13, $14
+		)
+	`
 
-    now := time.Now()
-    user.CreatedAt = now
-    user.UpdatedAt = now
+	now := time.Now()
+	user.CreatedAt = now
+	user.UpdatedAt = now
 
-    if user.ID == uuid.Nil {
-        user.ID = uuid.New()
-    }
+	if user.ID == uuid.Nil {
+		user.ID = uuid.New()
+	}
 
-    if user.Role == "" {
-        user.Role = "user"
-    }
+	if user.Role == "" {
+		user.Role = "user"
+	}
 
-    var referredBy any
-    if user.ReferredBy != nil {
-        referredBy = *user.ReferredBy
-    }
+	var referredBy any
+	if user.ReferredBy != nil && *user.ReferredBy != uuid.Nil {
+		referredBy = *user.ReferredBy
+	}
 
-    var agentID any
-    if user.AgentID != nil {
-        agentID = *user.AgentID
-    }
+	var agentID any
+	if user.AgentID != nil && *user.AgentID != uuid.Nil {
+		agentID = *user.AgentID
+	}
 
-    args := []any{
-        user.ID,
-        user.TelegramID,
-        user.FirstName,
-        user.LastName,
-        user.PhoneNumber,
-        user.ReferalCode,
-        user.Role,
-        user.Password,
-        user.IsBot,
-        referredBy,
-        agentID,
-        user.CreatedAt,
-        user.UpdatedAt,
-    }
+	// Extract raw start parameter (e.g., "AG472568") if available
+	var rawRefCode string
+	if user.ReferrerCode != nil {
+		rawRefCode = *user.ReferrerCode
+	}
 
-    var err error
-    if tx != nil {
-        _, err = tx.ExecContext(ctx, query, args...)
-    } else {
-        _, err = r.db.ExecContext(ctx, query, args...)
-    }
+	args := []any{
+		user.ID,
+		user.TelegramID,
+		user.FirstName,
+		user.LastName,
+		user.PhoneNumber,
+		user.ReferalCode,
+		user.Role,
+		user.Password,
+		user.IsBot,
+		referredBy, // $10: direct user UUID if already resolved
+		rawRefCode, // $11: raw start string code to look up in agents/users
+		agentID,    // $12: direct agent UUID if already resolved
+		user.CreatedAt,
+		user.UpdatedAt,
+	}
 
-    if err != nil {
-        return fmt.Errorf("failed to create user: %w", err)
-    }
+	var err error
+	if tx != nil {
+		_, err = tx.ExecContext(ctx, query, args...)
+	} else {
+		_, err = r.db.ExecContext(ctx, query, args...)
+	}
 
-    return nil
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return nil
 }
+
+
 
 
 // FindByTelegramID finds a user by their Telegram ID
