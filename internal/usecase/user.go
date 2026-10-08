@@ -89,31 +89,96 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 
 	// Resolve the invite link's referral code to a referrer, if one came in.
 	// Best-effort: an unknown/blank code just means no referrer.
-	var referredBy *uuid.UUID
-	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
-		if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
-			// Self-referral guard: you cannot refer yourself. Reject a code that
-			// resolves to the same person who is registering (same Telegram ID or
-			// same phone), so nobody can pay themselves the reward with their own
-			// link. A genuinely different account is a real referral.
-			if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
-				log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
-			} else {
-				referredBy = &r.ID
-			}
-		}
-	}
+	// var referredBy *uuid.UUID
+	// if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+	// 	if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+	// 		// Self-referral guard: you cannot refer yourself. Reject a code that
+	// 		// resolves to the same person who is registering (same Telegram ID or
+	// 		// same phone), so nobody can pay themselves the reward with their own
+	// 		// link. A genuinely different account is a real referral.
+	// 		if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+	// 			log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
+	// 		} else {
+	// 			referredBy = &r.ID
+	// 		}
+	// 	}
+	// }
+// Resolve user referrals and agent referrals.
+var referredBy *uuid.UUID
+var agentID *uuid.UUID
+
+if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+
+    // Agent referral links
+    if strings.HasPrefix(strings.ToUpper(code), "AG") {
+
+        var aid uuid.UUID
+
+        err := tx.QueryRowContext(
+            ctx,
+            `
+            SELECT id
+            FROM agents
+            WHERE referral_code = $1
+            AND is_active = true
+            `,
+            code,
+        ).Scan(&aid)
+
+        if err == nil {
+            agentID = &aid
+            log.Printf(
+                "[agent] linked user %d to agent code %s",
+                req.TelegramID,
+                code,
+            )
+        }
+
+    } else {
+
+        // Normal player referral links
+        if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+
+            if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+
+                log.Printf(
+                    "[referral] ignoring self-referral by tg_id=%d",
+                    req.TelegramID,
+                )
+
+            } else {
+
+                referredBy = &r.ID
+            }
+        }
+    }
+}
+
+
+
 
 	// Create the user and retain the referral relationship. The referrer is paid
 	// only after this player completes their first real deposit.
-	user := &domain.User{
-		TelegramID:  req.TelegramID,
-		FirstName:   req.FirstName,
-		LastName:    req.LastName,
-		PhoneNumber: normalizedPhone,
-		ReferalCode: referralCode,
-		ReferredBy:  referredBy,
-	}
+	// user := &domain.User{
+	// 	TelegramID:  req.TelegramID,
+	// 	FirstName:   req.FirstName,
+	// 	LastName:    req.LastName,
+	// 	PhoneNumber: normalizedPhone,
+	// 	ReferalCode: referralCode,
+	// 	ReferredBy:  referredBy,
+	// }
+
+user := &domain.User{
+    TelegramID:  req.TelegramID,
+    FirstName:   req.FirstName,
+    LastName:    req.LastName,
+    PhoneNumber: normalizedPhone,
+    ReferalCode: referralCode,
+    ReferredBy:  referredBy,
+    AgentID:     agentID,
+}
+
+
 
 	if err := uc.userRepo.Create(ctx, tx, user); err != nil {
 		return nil, nil, fmt.Errorf("failed to create user: %w", err)

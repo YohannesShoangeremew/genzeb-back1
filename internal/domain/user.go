@@ -16,6 +16,8 @@ type User struct {
 	ReferalCode string    `json:"referal_code" db:"referal_code"`
 	// ReferredBy is who invited this user (nil if they signed up on their own),
 	// set once at registration from the ?start=ref_<code> deep link.
+
+	AgentID *uuid.UUID `json:"agent_id,omitempty" db:"agent_id"`
 	ReferredBy *uuid.UUID `json:"referred_by,omitempty" db:"referred_by"`
 	Role       string     `json:"role" db:"role"`
 	Banned     bool       `json:"banned" db:"banned"`

@@ -20,59 +20,136 @@ func NewUserRepository(db *sql.DB) domain.UserRepository {
 	return &userRepository{db: db}
 }
 
-// Create inserts a new user into the database
+// // Create inserts a new user into the database
+// func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.User) error {
+// 	query := `
+// 		INSERT INTO users (id, telegram_id, first_name, last_name, phone_number, referal_code, role, password, is_bot, referred_by, created_at, updated_at)
+// 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+// 	`
+
+// 	now := time.Now()
+// 	user.CreatedAt = now
+// 	user.UpdatedAt = now
+
+// 	if user.ID == uuid.Nil {
+// 		user.ID = uuid.New()
+// 	}
+
+// 	// Set default role if not provided
+// 	if user.Role == "" {
+// 		user.Role = "user"
+// 	}
+
+// 	var referredBy any
+// 	if user.ReferredBy != nil {
+// 		referredBy = *user.ReferredBy
+// 	}
+
+// 	args := []any{
+// 		user.ID,
+// 		user.TelegramID,
+// 		user.FirstName,
+// 		user.LastName,
+// 		user.PhoneNumber,
+// 		user.ReferalCode,
+// 		user.Role,
+// 		user.Password,
+// 		user.IsBot,
+// 		referredBy,
+// 		user.CreatedAt,
+// 		user.UpdatedAt,
+// 	}
+
+// 	var err error
+// 	if tx != nil {
+// 		_, err = tx.ExecContext(ctx, query, args...)
+// 	} else {
+// 		_, err = r.db.ExecContext(ctx, query, args...)
+// 	}
+
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create user: %w", err)
+// 	}
+
+// 	return nil
+// }
+
+
 func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.User) error {
-	query := `
-		INSERT INTO users (id, telegram_id, first_name, last_name, phone_number, referal_code, role, password, is_bot, referred_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`
+    query := `
+        INSERT INTO users (
+            id,
+            telegram_id,
+            first_name,
+            last_name,
+            phone_number,
+            referal_code,
+            role,
+            password,
+            is_bot,
+            referred_by,
+            agent_id,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, $12, $13
+        )
+    `
 
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
+    now := time.Now()
+    user.CreatedAt = now
+    user.UpdatedAt = now
 
-	if user.ID == uuid.Nil {
-		user.ID = uuid.New()
-	}
+    if user.ID == uuid.Nil {
+        user.ID = uuid.New()
+    }
 
-	// Set default role if not provided
-	if user.Role == "" {
-		user.Role = "user"
-	}
+    if user.Role == "" {
+        user.Role = "user"
+    }
 
-	var referredBy any
-	if user.ReferredBy != nil {
-		referredBy = *user.ReferredBy
-	}
+    var referredBy any
+    if user.ReferredBy != nil {
+        referredBy = *user.ReferredBy
+    }
 
-	args := []any{
-		user.ID,
-		user.TelegramID,
-		user.FirstName,
-		user.LastName,
-		user.PhoneNumber,
-		user.ReferalCode,
-		user.Role,
-		user.Password,
-		user.IsBot,
-		referredBy,
-		user.CreatedAt,
-		user.UpdatedAt,
-	}
+    var agentID any
+    if user.AgentID != nil {
+        agentID = *user.AgentID
+    }
 
-	var err error
-	if tx != nil {
-		_, err = tx.ExecContext(ctx, query, args...)
-	} else {
-		_, err = r.db.ExecContext(ctx, query, args...)
-	}
+    args := []any{
+        user.ID,
+        user.TelegramID,
+        user.FirstName,
+        user.LastName,
+        user.PhoneNumber,
+        user.ReferalCode,
+        user.Role,
+        user.Password,
+        user.IsBot,
+        referredBy,
+        agentID,
+        user.CreatedAt,
+        user.UpdatedAt,
+    }
 
-	if err != nil {
-		return fmt.Errorf("failed to create user: %w", err)
-	}
+    var err error
+    if tx != nil {
+        _, err = tx.ExecContext(ctx, query, args...)
+    } else {
+        _, err = r.db.ExecContext(ctx, query, args...)
+    }
 
-	return nil
+    if err != nil {
+        return fmt.Errorf("failed to create user: %w", err)
+    }
+
+    return nil
 }
+
 
 // FindByTelegramID finds a user by their Telegram ID
 func (r *userRepository) FindByTelegramID(ctx context.Context, telegramID int64) (*domain.User, error) {
