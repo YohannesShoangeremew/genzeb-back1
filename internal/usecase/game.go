@@ -639,196 +639,6 @@ func (uc *GameUseCase) runCountdownThenDraw(ctx context.Context, gameID uuid.UUI
 // The whole commit runs under the game-row lock: concurrent joins/leaves block
 // until we finish and then see DRAWING (join rejected) or the recomputed
 // counters, so no reservation slips in mid-charge and no counter update is lost.
-// func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
-// 	tx, err := uc.db.BeginTx(ctx, nil)
-// 	if err != nil {
-// 		return
-// 	}
-// 	defer tx.Rollback() // no-op after a successful Commit below
-
-// 	game, err := uc.gameRepo.LockForUpdate(ctx, tx, gameID)
-// 	if err != nil || game.State != domain.GameStateCountdown {
-// 		return
-// 	}
-
-// 	active, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
-// 	if err != nil {
-// 		return
-// 	}
-
-// 	// Charge each player for their reserved (unpaid) cards, all at once. A player
-// 	// who can no longer cover their reservations has those cards dropped (they
-// 	// were never charged, so there is nothing to refund).
-// 	unpaidByUser := map[uuid.UUID]int{}
-// 	for _, p := range active {
-// 		if !p.Paid {
-// 			unpaidByUser[p.UserID]++
-// 		}
-// 	}
-
-// 	gameBetRef := "GAME_BET"
-// 	var droppedCards []int
-// 	for userID, count := range unpaidByUser {
-// 		wallet, err := uc.walletRepo.LockForUpdate(ctx, tx, userID)
-// 		if err != nil {
-// 			return
-// 		}
-// 		// Play-only bonus pays first, in whole cards. Deciding the split BEFORE
-// 		// spending anything matters: consuming bonus and only then finding the
-// 		// player short of cash for the remainder would strand the bonus on a
-// 		// card they never got. The grant rows are locked by this read, so the
-// 		// figure cannot move between here and the consume below.
-// 		bonusCards := 0
-// 		var bonusExpiry *time.Time
-// 		if uc.bonusRepo != nil {
-// 			available, berr := uc.bonusRepo.SpendableForUpdate(ctx, tx, userID)
-// 			if berr != nil {
-// 				return
-// 			}
-// 			bonusCards = int(available / game.BetAmount)
-// 			if bonusCards > count {
-// 				bonusCards = count
-// 			}
-// 		}
-
-// 		cashCards := count - bonusCards
-// 		cashCost := float64(cashCards) * game.BetAmount
-// 		if wallet.Balance < cashCost {
-// 			// Can't pay: release all of this player's reserved cards. No bonus
-// 			// has been consumed yet, so there is nothing to unwind.
-// 			for _, p := range active {
-// 				if p.UserID == userID && !p.Paid {
-// 					if _, err := uc.gameRepo.RemovePlayerCard(ctx, tx, gameID, userID, p.CardID); err != nil {
-// 						return
-// 					}
-// 					droppedCards = append(droppedCards, p.CardID)
-// 				}
-// 			}
-// 			continue
-// 		}
-
-// 		if bonusCards > 0 {
-// 			paid, expiry, berr := uc.bonusRepo.ConsumeForStake(ctx, tx, userID, game.BetAmount, bonusCards)
-// 			if berr != nil {
-// 				return
-// 			}
-// 			// Defensive: the locked read above should make these agree. If they
-// 			// ever diverge, charge the difference as cash rather than letting
-// 			// the player hold cards nobody paid for.
-// 			bonusCards = paid
-// 			bonusExpiry = expiry
-// 			cashCards = count - bonusCards
-// 			cashCost = float64(cashCards) * game.BetAmount
-// 			if wallet.Balance < cashCost {
-// 				return
-// 			}
-// 		}
-
-// 		// Deduct the cash portion and record one bet transaction per card.
-// 		if cashCost > 0 {
-// 			if err := uc.walletRepo.UpdateBalance(ctx, tx, userID, -cashCost); err != nil {
-// 				return
-// 			}
-// 		}
-// 		for i := 0; i < count; i++ {
-// 			// Bonus-funded stakes carry their own category so promotional
-// 			// turnover can be told apart from cash turnover in reporting. The
-// 			// GAME_ reference is unchanged, so both stay out of the player's
-// 			// cash history exactly as before.
-// 			category := domain.TransactionCategoryBet
-// 			if i < bonusCards {
-// 				category = domain.TransactionCategoryBonusStake
-// 			}
-// 			betTx := &domain.Transaction{
-// 				UserID:    userID,
-// 				Type:      domain.TransactionTypeWithdraw,
-// 				Category:  category,
-// 				Amount:    game.BetAmount,
-// 				Status:    domain.TransactionStatusCompleted,
-// 				Reference: &gameBetRef,
-// 			}
-// 			if err := uc.transactionRepo.Create(ctx, tx, betTx); err != nil {
-// 				return
-// 			}
-// 		}
-// 		if _, err := uc.gameRepo.MarkUserCardsPaidTx(ctx, tx, gameID, userID); err != nil {
-// 			return
-// 		}
-// 		// Record which cards the bonus bought, and under whose deadline, so a
-// 		// refund returns them as bonus rather than as withdrawable cash.
-// 		if bonusCards > 0 && bonusExpiry != nil {
-// 			if _, err := uc.gameRepo.MarkCardsBonusFundedTx(ctx, tx, gameID, userID, bonusCards, *bonusExpiry); err != nil {
-// 				return
-// 			}
-// 		}
-// 	}
-
-// 	// Recompute the live counters from the paid cards that remain.
-// 	paidPlayers, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
-// 	if err != nil {
-// 		return
-// 	}
-// 	distinct := make(map[uuid.UUID]bool, len(paidPlayers))
-// 	for _, p := range paidPlayers {
-// 		distinct[p.UserID] = true
-// 	}
-// 	game.PlayerCount = len(distinct)
-// 	game.PrizePool = float64(len(paidPlayers)) * game.BetAmount * (1 - game.HouseCut)
-
-// 	// Not enough paying players (e.g. a reserver couldn't cover their cards at
-// 	// commit): don't start. Revert to WAITING and keep whoever did pay; the
-// 	// countdown restarts when another player joins. Their paid cards stay charged
-// 	// and play next round — same as a countdown that drops below the minimum.
-// 	if len(distinct) < domain.MinPlayers {
-// 		game.State = domain.GameStateWaiting
-// 		game.CountdownEnds = nil
-// 		if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
-// 			return
-// 		}
-// 		if err := tx.Commit(); err != nil {
-// 			return
-// 		}
-// 		uc.redisService.ClearCountdown(ctx, gameID)
-// 		for _, cardID := range droppedCards {
-// 			uc.redisService.RemoveTakenCard(ctx, gameID, cardID)
-// 		}
-// 		uc.redisService.SaveGameState(ctx, game)
-// 		uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventGameStatus, map[string]interface{}{
-// 			"status":       string(domain.GameStateWaiting),
-// 			"prize_pool":   game.PrizePool,
-// 			"player_count": game.PlayerCount,
-// 		})
-// 		return
-// 	}
-
-// 	game.State = domain.GameStateDrawing
-// 	now := time.Now()
-// 	game.StartedAt = &now
-// 	if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
-// 		return
-// 	}
-// 	if err := tx.Commit(); err != nil {
-// 		return
-// 	}
-
-// 	for _, cardID := range droppedCards {
-// 		uc.redisService.RemoveTakenCard(ctx, gameID, cardID)
-// 	}
-// 	uc.redisService.SaveGameState(ctx, game)
-// 	uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventGameStatus, map[string]interface{}{
-// 		"status":       string(domain.GameStateDrawing),
-// 		"prize_pool":   game.PrizePool,
-// 		"player_count": game.PlayerCount,
-// 	})
-
-// 	// Start drawing numbers periodically
-// 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
-// }
-
-
-
-
-
 func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -863,7 +673,11 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		if err != nil {
 			return
 		}
-		// Play-only bonus pays first, in whole cards.
+		// Play-only bonus pays first, in whole cards. Deciding the split BEFORE
+		// spending anything matters: consuming bonus and only then finding the
+		// player short of cash for the remainder would strand the bonus on a
+		// card they never got. The grant rows are locked by this read, so the
+		// figure cannot move between here and the consume below.
 		bonusCards := 0
 		var bonusExpiry *time.Time
 		if uc.bonusRepo != nil {
@@ -880,7 +694,8 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		cashCards := count - bonusCards
 		cashCost := float64(cashCards) * game.BetAmount
 		if wallet.Balance < cashCost {
-			// Can't pay: release all of this player's reserved cards.
+			// Can't pay: release all of this player's reserved cards. No bonus
+			// has been consumed yet, so there is nothing to unwind.
 			for _, p := range active {
 				if p.UserID == userID && !p.Paid {
 					if _, err := uc.gameRepo.RemovePlayerCard(ctx, tx, gameID, userID, p.CardID); err != nil {
@@ -897,6 +712,9 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			if berr != nil {
 				return
 			}
+			// Defensive: the locked read above should make these agree. If they
+			// ever diverge, charge the difference as cash rather than letting
+			// the player hold cards nobody paid for.
 			bonusCards = paid
 			bonusExpiry = expiry
 			cashCards = count - bonusCards
@@ -912,13 +730,11 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 				return
 			}
 		}
-
-		// Check if the player was referred by an agent
-		var agentID uuid.NullUUID
-		var playerTelegramID int64
-		_ = tx.QueryRowContext(ctx, `SELECT agent_id, telegram_id FROM users WHERE id = $1`, userID).Scan(&agentID, &playerTelegramID)
-
 		for i := 0; i < count; i++ {
+			// Bonus-funded stakes carry their own category so promotional
+			// turnover can be told apart from cash turnover in reporting. The
+			// GAME_ reference is unchanged, so both stay out of the player's
+			// cash history exactly as before.
 			category := domain.TransactionCategoryBet
 			if i < bonusCards {
 				category = domain.TransactionCategoryBonusStake
@@ -934,39 +750,12 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			if err := uc.transactionRepo.Create(ctx, tx, betTx); err != nil {
 				return
 			}
-
-			// =========================================================
-			// AGENT COMMISSION LOGIC (2% of card stake)
-			// =========================================================
-			if agentID.Valid {
-				commissionAmount := game.BetAmount * 0.02
-
-				// 1. Log the commission in agent_commissions table
-				_, err = tx.ExecContext(ctx, `
-					INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
-					agentID.UUID, playerTelegramID, gameID.String(), commissionAmount,
-				)
-				if err != nil {
-					return
-				}
-
-				// 2. Increase the agent's wallet balance
-				_, err = tx.ExecContext(ctx, `
-					UPDATE agents 
-					SET balance = balance + $1 
-					WHERE id = $2`,
-					commissionAmount, agentID.UUID,
-				)
-				if err != nil {
-					return
-				}
-			}
 		}
-
 		if _, err := uc.gameRepo.MarkUserCardsPaidTx(ctx, tx, gameID, userID); err != nil {
 			return
 		}
+		// Record which cards the bonus bought, and under whose deadline, so a
+		// refund returns them as bonus rather than as withdrawable cash.
 		if bonusCards > 0 && bonusExpiry != nil {
 			if _, err := uc.gameRepo.MarkCardsBonusFundedTx(ctx, tx, gameID, userID, bonusCards, *bonusExpiry); err != nil {
 				return
@@ -986,6 +775,10 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	game.PlayerCount = len(distinct)
 	game.PrizePool = float64(len(paidPlayers)) * game.BetAmount * (1 - game.HouseCut)
 
+	// Not enough paying players (e.g. a reserver couldn't cover their cards at
+	// commit): don't start. Revert to WAITING and keep whoever did pay; the
+	// countdown restarts when another player joins. Their paid cards stay charged
+	// and play next round — same as a countdown that drops below the minimum.
 	if len(distinct) < domain.MinPlayers {
 		game.State = domain.GameStateWaiting
 		game.CountdownEnds = nil
@@ -1031,18 +824,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	// Start drawing numbers periodically
 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 // acquireDrawLease claims the game's draw lease, retrying long enough to outlast
 // a departing instance's lease during a deploy overlap so the survivor takes over
