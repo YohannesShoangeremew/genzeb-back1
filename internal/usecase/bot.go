@@ -86,7 +86,7 @@ var botDisplayNames = []string{
     "YonasG", "yordi", "K", "mariiii", "Luna",
     "Glory", "Goytom", "Abrish", "Sewmalet", "Meseret",
     "Abdulselam", "Abdi", "Kedir", "babyyyy", "Starboy",
-    "MyLove", "Yabsera", "Faya", "Nuro", "ElaBest"
+    "MyLove", "Yabsera", "Faya", "Nuro", "ElaBest",
 }
 
 // BotSettings holds the operator-tunable knobs supplied from config/env.
