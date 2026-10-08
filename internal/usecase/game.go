@@ -854,13 +854,12 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	gameBetRef := "GAME_BET"
 	var droppedCards []int
 
-	// Struct to track commissions to credit AFTER card processing
-	type pendingCommission struct {
-		agentID    uuid.UUID
-		playerTgID int64
-		amount     float64
+	// Track paid user card purchases to process commissions AFTER tx.Commit()
+	type paidUserSummary struct {
+		userID    uuid.UUID
+		cardCount int
 	}
-	var commissionsToCredit []pendingCommission
+	var paidUsers []paidUserSummary
 
 	for userID, count := range unpaidByUser {
 		wallet, err := uc.walletRepo.LockForUpdate(ctx, tx, userID)
@@ -915,24 +914,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			}
 		}
 
-		// Safe Agent Lookup
-		var agentID uuid.NullUUID
-		var playerTelegramID sql.NullInt64
-		_ = tx.QueryRowContext(ctx, `
-			SELECT agent_id, telegram_id 
-			FROM users 
-			WHERE id = $1`, 
-			userID,
-		).Scan(&agentID, &playerTelegramID)
-
-		if agentID.Valid {
-			commissionsToCredit = append(commissionsToCredit, pendingCommission{
-				agentID:    agentID.UUID,
-				playerTgID: playerTelegramID.Int64,
-				amount:     game.BetAmount * float64(count) * 0.02, // 2% of total cards
-			})
-		}
-
 		for i := 0; i < count; i++ {
 			category := domain.TransactionCategoryBet
 			if i < bonusCards {
@@ -951,24 +932,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			}
 		}
 
-		// Process Agent Commission safely inside the same tx
-		if agentID.Valid {
-			commAmount := game.BetAmount * float64(count) * 0.02
-			_, _ = tx.ExecContext(ctx, `
-				INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
-				VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
-				ON CONFLICT DO NOTHING`,
-				agentID.UUID, playerTelegramID.Int64, gameID.String(), commAmount,
-			)
-
-			_, _ = tx.ExecContext(ctx, `
-				UPDATE agents 
-				SET balance = balance + $1 
-				WHERE id = $2`,
-				commAmount, agentID.UUID,
-			)
-		}
-
 		if _, err := uc.gameRepo.MarkUserCardsPaidTx(ctx, tx, gameID, userID); err != nil {
 			return
 		}
@@ -977,6 +940,11 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 				return
 			}
 		}
+
+		paidUsers = append(paidUsers, paidUserSummary{
+			userID:    userID,
+			cardCount: count,
+		})
 	}
 
 	paidPlayers, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
@@ -1018,10 +986,13 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
 		return
 	}
+
+	// COMMIT THE GAME TRANSACTION FIRST
 	if err := tx.Commit(); err != nil {
 		return
 	}
 
+	// Clean Redis and update game status
 	for _, cardID := range droppedCards {
 		uc.redisService.RemoveTakenCard(ctx, gameID, cardID)
 	}
@@ -1032,8 +1003,57 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		"player_count": game.PlayerCount,
 	})
 
-	// Start drawing numbers periodically
+	// 1. Process Agent Commissions asynchronously (Safe & Isolated)
+	utils.GoSafe("processAgentCommissions", func() {
+		uc.processAgentCommissions(context.Background(), gameID, game.BetAmount, paidUsers)
+	})
+
+	// 2. Start drawing numbers periodically
 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
+}
+
+// Separate helper method to process agent commissions cleanly in its own transaction
+func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []struct {
+	userID    uuid.UUID
+	cardCount int
+}) {
+	for _, pu := range paidUsers {
+		var agentID uuid.UUID
+		var telegramID int64
+
+		err := uc.db.QueryRowContext(ctx, `
+			SELECT agent_id, telegram_id 
+			FROM users 
+			WHERE id = $1 AND agent_id IS NOT NULL`,
+			pu.userID,
+		).Scan(&agentID, &telegramID)
+
+		if err != nil || agentID == uuid.Nil {
+			continue // Player was not referred by an agent
+		}
+
+		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
+
+		tx, err := uc.db.BeginTx(ctx, nil)
+		if err != nil {
+			continue
+		}
+
+		_, _ = tx.ExecContext(ctx, `
+			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+			agentID, telegramID, gameID.String(), commissionAmount,
+		)
+
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE agents 
+			SET balance = balance + $1 
+			WHERE id = $2`,
+			commissionAmount, agentID,
+		)
+
+		_ = tx.Commit()
+	}
 }
 
 
