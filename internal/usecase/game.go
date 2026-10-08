@@ -3061,11 +3061,61 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
 }
 
-// Separate helper method to process agent commissions cleanly in its own transaction
+// // Separate helper method to process agent commissions cleanly in its own transaction
+// func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
+// 	for _, pu := range paidUsers {
+// 		var agentID uuid.UUID
+// 		var telegramID int64
+
+// 		err := uc.db.QueryRowContext(ctx, `
+// 			SELECT agent_id, telegram_id 
+// 			FROM users 
+// 			WHERE id = $1 AND agent_id IS NOT NULL`,
+// 			pu.userID,
+// 		).Scan(&agentID, &telegramID)
+
+// 		if err != nil || agentID == uuid.Nil {
+// 			continue // Player was not referred by an agent
+// 		}
+
+// 		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
+
+// 		tx, err := uc.db.BeginTx(ctx, nil)
+// 		if err != nil {
+// 			continue
+// 		}
+
+// 		_, err = tx.ExecContext(ctx, `
+// 			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
+// 			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+// 			agentID, telegramID, gameID.String(), commissionAmount,
+// 		)
+// 		if err != nil {
+// 			_ = tx.Rollback()
+// 			continue
+// 		}
+
+// 		_, err = tx.ExecContext(ctx, `
+// 			UPDATE agents 
+// 			SET balance = balance + $1 
+// 			WHERE id = $2`,
+// 			commissionAmount, agentID,
+// 		)
+// 		if err != nil {
+// 			_ = tx.Rollback()
+// 			continue
+// 		}
+
+// 		_ = tx.Commit()
+// 	}
+// }
+
 func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
+	fmt.Printf("[COMMISSION DEBUG] Starting processing for game %s with %d users\n", gameID.String(), len(paidUsers))
+
 	for _, pu := range paidUsers {
-		var agentID uuid.UUID
-		var telegramID int64
+		var agentID uuid.NullUUID
+		var telegramID sql.NullInt64
 
 		err := uc.db.QueryRowContext(ctx, `
 			SELECT agent_id, telegram_id 
@@ -3074,23 +3124,27 @@ func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.
 			pu.userID,
 		).Scan(&agentID, &telegramID)
 
-		if err != nil || agentID == uuid.Nil {
-			continue // Player was not referred by an agent
+		if err != nil || !agentID.Valid || !telegramID.Valid {
+			fmt.Printf("[COMMISSION DEBUG] User %s has no valid agent or error: %v\n", pu.userID.String(), err)
+			continue
 		}
 
 		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
+		fmt.Printf("[COMMISSION DEBUG] Crediting Agent %s for Player %d: %.2f ETB\n", agentID.UUID.String(), telegramID.Int64, commissionAmount)
 
 		tx, err := uc.db.BeginTx(ctx, nil)
 		if err != nil {
+			fmt.Printf("[COMMISSION DEBUG] Failed to begin tx: %v\n", err)
 			continue
 		}
 
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
 			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
-			agentID, telegramID, gameID.String(), commissionAmount,
+			agentID.UUID, telegramID.Int64, gameID.String(), commissionAmount,
 		)
 		if err != nil {
+			fmt.Printf("[COMMISSION DEBUG] Failed to insert agent_commissions: %v\n", err)
 			_ = tx.Rollback()
 			continue
 		}
@@ -3099,18 +3153,21 @@ func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.
 			UPDATE agents 
 			SET balance = balance + $1 
 			WHERE id = $2`,
-			commissionAmount, agentID,
+			commissionAmount, agentID.UUID,
 		)
 		if err != nil {
+			fmt.Printf("[COMMISSION DEBUG] Failed to update agent balance: %v\n", err)
 			_ = tx.Rollback()
 			continue
 		}
 
-		_ = tx.Commit()
+		if err := tx.Commit(); err != nil {
+			fmt.Printf("[COMMISSION DEBUG] Failed to commit commission tx: %v\n", err)
+		} else {
+			fmt.Printf("[COMMISSION DEBUG] SUCCESS! Added %.2f ETB to Agent %s\n", commissionAmount, agentID.UUID.String())
+		}
 	}
 }
-
-
 
 // // Separate helper method to process agent commissions cleanly in its own transaction
 // func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
