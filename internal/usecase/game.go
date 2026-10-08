@@ -3112,46 +3112,46 @@ func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.
 
 
 
-// Separate helper method to process agent commissions cleanly in its own transaction
-func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
-	for _, pu := range paidUsers {
-		var agentID uuid.UUID
-		var telegramID int64
+// // Separate helper method to process agent commissions cleanly in its own transaction
+// func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
+// 	for _, pu := range paidUsers {
+// 		var agentID uuid.UUID
+// 		var telegramID int64
 
-		err := uc.db.QueryRowContext(ctx, `
-			SELECT agent_id, telegram_id 
-			FROM users 
-			WHERE id = $1 AND agent_id IS NOT NULL`,
-			pu.userID,
-		).Scan(&agentID, &telegramID)
+// 		err := uc.db.QueryRowContext(ctx, `
+// 			SELECT agent_id, telegram_id 
+// 			FROM users 
+// 			WHERE id = $1 AND agent_id IS NOT NULL`,
+// 			pu.userID,
+// 		).Scan(&agentID, &telegramID)
 
-		if err != nil || agentID == uuid.Nil {
-			continue // Player was not referred by an agent
-		}
+// 		if err != nil || agentID == uuid.Nil {
+// 			continue // Player was not referred by an agent
+// 		}
 
-		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
+// 		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
 
-		tx, err := uc.db.BeginTx(ctx, nil)
-		if err != nil {
-			continue
-		}
+// 		tx, err := uc.db.BeginTx(ctx, nil)
+// 		if err != nil {
+// 			continue
+// 		}
 
-		_, _ = tx.ExecContext(ctx, `
-			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
-			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
-			agentID, telegramID, gameID.String(), commissionAmount,
-		)
+// 		_, _ = tx.ExecContext(ctx, `
+// 			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
+// 			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+// 			agentID, telegramID, gameID.String(), commissionAmount,
+// 		)
 
-		_, _ = tx.ExecContext(ctx, `
-			UPDATE agents 
-			SET balance = balance + $1 
-			WHERE id = $2`,
-			commissionAmount, agentID,
-		)
+// 		_, _ = tx.ExecContext(ctx, `
+// 			UPDATE agents 
+// 			SET balance = balance + $1 
+// 			WHERE id = $2`,
+// 			commissionAmount, agentID,
+// 		)
 
-		_ = tx.Commit()
-	}
-}
+// 		_ = tx.Commit()
+// 	}
+// }
 
 // acquireDrawLease claims the game's draw lease
 func (uc *GameUseCase) acquireDrawLease(ctx context.Context, gameID uuid.UUID, token string) bool {
