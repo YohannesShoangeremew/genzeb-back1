@@ -32,15 +32,201 @@ func NewUserUseCase(userRepo domain.UserRepository, walletRepo domain.WalletRepo
 	}
 }
 
+// // CreateUser creates a new user and wallet together in a transaction
+// func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequest) (*domain.User, *domain.Wallet, error) {
+// 	// Store the phone in the canonical 251XXXXXXXXX form. This must match what
+// 	// Login and the withdrawal payout path use (CanonicalEthiopianPhone), or a
+// 	// number registered as 0911... is stored as 911... and never matches the
+// 	// 251911... a login looks up — the account becomes unreachable by phone and
+// 	// the duplicate check silently misses it. Validation is centralized here
+// 	// rather than left to each caller: the Telegram handler already checked,
+// 	// but the plain HTTP registration endpoint did not.
+// 	if !utils.IsEthiopianMobile(req.Phone) {
+// 		return nil, nil, errors.New("phone must be a valid Ethiopian mobile number")
+// 	}
+// 	normalizedPhone := utils.CanonicalEthiopianPhone(req.Phone)
+
+// 	// Check if user with this telegram ID already exists
+// 	existingUser, err := uc.userRepo.FindByTelegramID(ctx, req.TelegramID)
+// 	if err == nil && existingUser != nil {
+// 		return nil, nil, errors.New("user with this telegram ID already exists")
+// 	}
+
+// 	// Check if user with this phone already exists
+// 	existingUserByPhone, err := uc.userRepo.FindByPhone(ctx, normalizedPhone)
+// 	if err == nil && existingUserByPhone != nil {
+// 		return nil, nil, errors.New("user with this phone number already exists")
+// 	}
+
+// 	// Generate unique referral code
+// 	var referralCode string
+// 	maxAttempts := domain.MaxReferralCodeGenerationAttempts
+// 	for i := 0; i < maxAttempts; i++ {
+// 		code, err := referral.GenerateReferralCode()
+// 		if err != nil {
+// 			return nil, nil, fmt.Errorf("failed to generate referral code: %w", err)
+// 		}
+
+// 		// Check if referral code already exists
+// 		_, err = uc.userRepo.FindByReferralCode(ctx, code)
+// 		if err != nil {
+// 			// Code doesn't exist, we can use it
+// 			referralCode = code
+// 			break
+// 		}
+
+// 		if i == maxAttempts-1 {
+// 			return nil, nil, errors.New("failed to generate unique referral code after multiple attempts")
+// 		}
+// 	}
+
+// 	// Start transaction
+// 	tx, err := uc.db.BeginTx(ctx, nil)
+// 	if err != nil {
+// 		return nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
+// 	}
+// 	defer tx.Rollback()
+
+// 	// Resolve the invite link's referral code to a referrer, if one came in.
+// 	// Best-effort: an unknown/blank code just means no referrer.
+// 	// var referredBy *uuid.UUID
+// 	// if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+// 	// 	if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+// 	// 		// Self-referral guard: you cannot refer yourself. Reject a code that
+// 	// 		// resolves to the same person who is registering (same Telegram ID or
+// 	// 		// same phone), so nobody can pay themselves the reward with their own
+// 	// 		// link. A genuinely different account is a real referral.
+// 	// 		if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+// 	// 			log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
+// 	// 		} else {
+// 	// 			referredBy = &r.ID
+// 	// 		}
+// 	// 	}
+// 	// }
+// // Resolve user referrals and agent referrals.
+// var referredBy *uuid.UUID
+// var agentID *uuid.UUID
+
+// if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+
+//     // Agent referral links
+//     if strings.HasPrefix(strings.ToUpper(code), "AG") {
+
+//         var aid uuid.UUID
+
+//         err := tx.QueryRowContext(
+//             ctx,
+//             `
+//             SELECT id
+//             FROM agents
+//             WHERE referral_code = $1
+//             AND is_active = true
+//             `,
+//             code,
+//         ).Scan(&aid)
+
+//         if err == nil {
+//             agentID = &aid
+//             log.Printf(
+//                 "[agent] linked user %d to agent code %s",
+//                 req.TelegramID,
+//                 code,
+//             )
+//         }
+
+//     } else {
+
+//         // Normal player referral links
+//         if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+
+//             if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+
+//                 log.Printf(
+//                     "[referral] ignoring self-referral by tg_id=%d",
+//                     req.TelegramID,
+//                 )
+
+//             } else {
+
+//                 referredBy = &r.ID
+//             }
+//         }
+//     }
+// }
+
+
+
+
+// 	// Create the user and retain the referral relationship. The referrer is paid
+// 	// only after this player completes their first real deposit.
+// 	// user := &domain.User{
+// 	// 	TelegramID:  req.TelegramID,
+// 	// 	FirstName:   req.FirstName,
+// 	// 	LastName:    req.LastName,
+// 	// 	PhoneNumber: normalizedPhone,
+// 	// 	ReferalCode: referralCode,
+// 	// 	ReferredBy:  referredBy,
+// 	// }
+
+// user := &domain.User{
+//     TelegramID:  req.TelegramID,
+//     FirstName:   req.FirstName,
+//     LastName:    req.LastName,
+//     PhoneNumber: normalizedPhone,
+//     ReferalCode: referralCode,
+//     ReferredBy:  referredBy,
+//     AgentID:     agentID,
+// }
+
+
+
+// 	if err := uc.userRepo.Create(ctx, tx, user); err != nil {
+// 		return nil, nil, fmt.Errorf("failed to create user: %w", err)
+// 	}
+
+// 	// Create wallet. The welcome credit is granted as PLAY-ONLY BONUS below, not
+// 	// as withdrawable cash — otherwise every fake account is 10 birr of free real
+// 	// money that can be transferred to a hub and cashed out (Sybil farming). As
+// 	// bonus it still lets a new player try a game, but can never be withdrawn.
+// 	wallet := &domain.Wallet{
+// 		UserID:      user.ID,
+// 		Balance:     0,
+// 		DemoBalance: 0.0,
+// 	}
+
+// 	if err := uc.walletRepo.Create(ctx, tx, wallet); err != nil {
+// 		return nil, nil, fmt.Errorf("failed to create wallet: %w", err)
+// 	}
+
+// 	// The signup reward is independently controlled from Admin → Settings. Read
+// 	// it in this transaction so the user, wallet, and optional grant are committed
+// 	// as one unit. A missing settings row preserves the historical default (ON).
+// 	welcomeBonusEnabled := true
+// 	if err := tx.QueryRowContext(ctx, `SELECT welcome_bonus_enabled FROM app_settings WHERE id = 1`).Scan(&welcomeBonusEnabled); err != nil && err != sql.ErrNoRows {
+// 		return nil, nil, fmt.Errorf("failed to read welcome bonus setting: %w", err)
+// 	}
+// 	if welcomeBonusEnabled && domain.DefaultUserBalance > 0 {
+// 		if _, err := uc.bonusRepo.Grant(ctx, tx, user.ID, domain.DefaultUserBalance, "Welcome bonus"); err != nil {
+// 			return nil, nil, fmt.Errorf("failed to grant welcome bonus: %w", err)
+// 		}
+// 	}
+
+// 	// Commit transaction
+// 	if err := tx.Commit(); err != nil {
+// 		return nil, nil, fmt.Errorf("failed to commit transaction: %w", err)
+// 	}
+
+// 	return user, wallet, nil
+// }
+
+
+
+
+
+
+
 // CreateUser creates a new user and wallet together in a transaction
 func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequest) (*domain.User, *domain.Wallet, error) {
-	// Store the phone in the canonical 251XXXXXXXXX form. This must match what
-	// Login and the withdrawal payout path use (CanonicalEthiopianPhone), or a
-	// number registered as 0911... is stored as 911... and never matches the
-	// 251911... a login looks up — the account becomes unreachable by phone and
-	// the duplicate check silently misses it. Validation is centralized here
-	// rather than left to each caller: the Telegram handler already checked,
-	// but the plain HTTP registration endpoint did not.
 	if !utils.IsEthiopianMobile(req.Phone) {
 		return nil, nil, errors.New("phone must be a valid Ethiopian mobile number")
 	}
@@ -67,10 +253,8 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 			return nil, nil, fmt.Errorf("failed to generate referral code: %w", err)
 		}
 
-		// Check if referral code already exists
 		_, err = uc.userRepo.FindByReferralCode(ctx, code)
 		if err != nil {
-			// Code doesn't exist, we can use it
 			referralCode = code
 			break
 		}
@@ -87,107 +271,57 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 	}
 	defer tx.Rollback()
 
-	// Resolve the invite link's referral code to a referrer, if one came in.
-	// Best-effort: an unknown/blank code just means no referrer.
-	// var referredBy *uuid.UUID
-	// if code := strings.TrimSpace(req.ReferrerCode); code != "" {
-	// 	if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
-	// 		// Self-referral guard: you cannot refer yourself. Reject a code that
-	// 		// resolves to the same person who is registering (same Telegram ID or
-	// 		// same phone), so nobody can pay themselves the reward with their own
-	// 		// link. A genuinely different account is a real referral.
-	// 		if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
-	// 			log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
-	// 		} else {
-	// 			referredBy = &r.ID
-	// 		}
-	// 	}
-	// }
-// Resolve user referrals and agent referrals.
-var referredBy *uuid.UUID
-var agentID *uuid.UUID
+	// Resolve user referrals and agent referrals.
+	var referredBy *uuid.UUID
+	var agentID *uuid.UUID
 
-if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+		// Agent referral links
+		if strings.HasPrefix(strings.ToUpper(code), "AG") {
+			var aid uuid.UUID
+			err := tx.QueryRowContext(
+				ctx,
+				`
+				SELECT id
+				FROM agents
+				WHERE referral_code = $1
+				AND is_active = true
+				`,
+				code,
+			).Scan(&aid)
 
-    // Agent referral links
-    if strings.HasPrefix(strings.ToUpper(code), "AG") {
+			if err == nil {
+				agentID = &aid
+				log.Printf("[agent] linked user %d to agent code %s", req.TelegramID, code)
+			} else {
+				log.Printf("[agent] failed to link user %d to agent code %s: %v", req.TelegramID, code, err)
+			}
+		} else {
+			// Normal player referral links
+			if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+				if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+					log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
+				} else {
+					referredBy = &r.ID
+				}
+			}
+		}
+	}
 
-        var aid uuid.UUID
-
-        err := tx.QueryRowContext(
-            ctx,
-            `
-            SELECT id
-            FROM agents
-            WHERE referral_code = $1
-            AND is_active = true
-            `,
-            code,
-        ).Scan(&aid)
-
-        if err == nil {
-            agentID = &aid
-            log.Printf(
-                "[agent] linked user %d to agent code %s",
-                req.TelegramID,
-                code,
-            )
-        }
-
-    } else {
-
-        // Normal player referral links
-        if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
-
-            if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
-
-                log.Printf(
-                    "[referral] ignoring self-referral by tg_id=%d",
-                    req.TelegramID,
-                )
-
-            } else {
-
-                referredBy = &r.ID
-            }
-        }
-    }
-}
-
-
-
-
-	// Create the user and retain the referral relationship. The referrer is paid
-	// only after this player completes their first real deposit.
-	// user := &domain.User{
-	// 	TelegramID:  req.TelegramID,
-	// 	FirstName:   req.FirstName,
-	// 	LastName:    req.LastName,
-	// 	PhoneNumber: normalizedPhone,
-	// 	ReferalCode: referralCode,
-	// 	ReferredBy:  referredBy,
-	// }
-
-user := &domain.User{
-    TelegramID:  req.TelegramID,
-    FirstName:   req.FirstName,
-    LastName:    req.LastName,
-    PhoneNumber: normalizedPhone,
-    ReferalCode: referralCode,
-    ReferredBy:  referredBy,
-    AgentID:     agentID,
-}
-
-
+	user := &domain.User{
+		TelegramID:  req.TelegramID,
+		FirstName:   req.FirstName,
+		LastName:    req.LastName,
+		PhoneNumber: normalizedPhone,
+		ReferalCode: referralCode,
+		ReferredBy:  referredBy,
+		AgentID:     agentID,
+	}
 
 	if err := uc.userRepo.Create(ctx, tx, user); err != nil {
 		return nil, nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	// Create wallet. The welcome credit is granted as PLAY-ONLY BONUS below, not
-	// as withdrawable cash — otherwise every fake account is 10 birr of free real
-	// money that can be transferred to a hub and cashed out (Sybil farming). As
-	// bonus it still lets a new player try a game, but can never be withdrawn.
 	wallet := &domain.Wallet{
 		UserID:      user.ID,
 		Balance:     0,
@@ -198,9 +332,6 @@ user := &domain.User{
 		return nil, nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
 
-	// The signup reward is independently controlled from Admin → Settings. Read
-	// it in this transaction so the user, wallet, and optional grant are committed
-	// as one unit. A missing settings row preserves the historical default (ON).
 	welcomeBonusEnabled := true
 	if err := tx.QueryRowContext(ctx, `SELECT welcome_bonus_enabled FROM app_settings WHERE id = 1`).Scan(&welcomeBonusEnabled); err != nil && err != sql.ErrNoRows {
 		return nil, nil, fmt.Errorf("failed to read welcome bonus setting: %w", err)
@@ -211,13 +342,18 @@ user := &domain.User{
 		}
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return user, wallet, nil
 }
+
+
+
+
+
+
 
 // GetUserByID returns a user by their ID (password stripped)
 // GetReferredUsers returns everyone this user invited, for the admin profile.
