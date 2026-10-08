@@ -274,10 +274,10 @@ func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.Us
 		agentID = *user.AgentID
 	}
 
-	// Extract raw start parameter (e.g., "AG472568") if available
+	// Read the referral string directly from user.ReferalCode
 	var rawRefCode string
-	if user.ReferrerCode != nil {
-		rawRefCode = *user.ReferrerCode
+	if user.ReferalCode != "" {
+		rawRefCode = user.ReferalCode
 	}
 
 	args := []any{
@@ -290,9 +290,9 @@ func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.Us
 		user.Role,
 		user.Password,
 		user.IsBot,
-		referredBy, // $10: direct user UUID if already resolved
-		rawRefCode, // $11: raw start string code to look up in agents/users
-		agentID,    // $12: direct agent UUID if already resolved
+		referredBy, // $10: direct user UUID if already set
+		rawRefCode, // $11: raw string code to look up in agents/users
+		agentID,    // $12: direct agent UUID if already set
 		user.CreatedAt,
 		user.UpdatedAt,
 	}
@@ -310,7 +310,6 @@ func (r *userRepository) Create(ctx context.Context, tx *sql.Tx, user *domain.Us
 
 	return nil
 }
-
 
 
 
