@@ -2688,6 +2688,191 @@ func (uc *GameUseCase) runCountdownThenDraw(ctx context.Context, gameID uuid.UUI
 	uc.startDrawing(ctx, gameID)
 }
 
+
+
+
+// // startDrawing charges all reservations, then transitions COUNTDOWN → DRAWING.
+// func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
+// 	tx, err := uc.db.BeginTx(ctx, nil)
+// 	if err != nil {
+// 		return
+// 	}
+// 	defer tx.Rollback() // no-op after a successful Commit below
+
+// 	game, err := uc.gameRepo.LockForUpdate(ctx, tx, gameID)
+// 	if err != nil || game.State != domain.GameStateCountdown {
+// 		return
+// 	}
+
+// 	active, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
+// 	if err != nil {
+// 		return
+// 	}
+
+// 	unpaidByUser := map[uuid.UUID]int{}
+// 	for _, p := range active {
+// 		if !p.Paid {
+// 			unpaidByUser[p.UserID]++
+// 		}
+// 	}
+
+// 	gameBetRef := "GAME_BET"
+// 	var droppedCards []int
+// 	var paidUsers []paidUserSummary
+
+// 	for userID, count := range unpaidByUser {
+// 		wallet, err := uc.walletRepo.LockForUpdate(ctx, tx, userID)
+// 		if err != nil {
+// 			return
+// 		}
+
+// 		bonusCards := 0
+// 		var bonusExpiry *time.Time
+// 		if uc.bonusRepo != nil {
+// 			available, berr := uc.bonusRepo.SpendableForUpdate(ctx, tx, userID)
+// 			if berr != nil {
+// 				return
+// 			}
+// 			bonusCards = int(available / game.BetAmount)
+// 			if bonusCards > count {
+// 				bonusCards = count
+// 			}
+// 		}
+
+// 		cashCards := count - bonusCards
+// 		cashCost := float64(cashCards) * game.BetAmount
+// 		if wallet.Balance < cashCost {
+// 			for _, p := range active {
+// 				if p.UserID == userID && !p.Paid {
+// 					if _, err := uc.gameRepo.RemovePlayerCard(ctx, tx, gameID, userID, p.CardID); err != nil {
+// 						return
+// 					}
+// 					droppedCards = append(droppedCards, p.CardID)
+// 				}
+// 			}
+// 			continue
+// 		}
+
+// 		if bonusCards > 0 {
+// 			paid, expiry, berr := uc.bonusRepo.ConsumeForStake(ctx, tx, userID, game.BetAmount, bonusCards)
+// 			if berr != nil {
+// 				return
+// 			}
+// 			bonusCards = paid
+// 			bonusExpiry = expiry
+// 			cashCards = count - bonusCards
+// 			cashCost = float64(cashCards) * game.BetAmount
+// 			if wallet.Balance < cashCost {
+// 				return
+// 			}
+// 		}
+
+// 		if cashCost > 0 {
+// 			if err := uc.walletRepo.UpdateBalance(ctx, tx, userID, -cashCost); err != nil {
+// 				return
+// 			}
+// 		}
+
+// 		for i := 0; i < count; i++ {
+// 			category := domain.TransactionCategoryBet
+// 			if i < bonusCards {
+// 				category = domain.TransactionCategoryBonusStake
+// 			}
+// 			betTx := &domain.Transaction{
+// 				UserID:    userID,
+// 				Type:      domain.TransactionTypeWithdraw,
+// 				Category:  category,
+// 				Amount:    game.BetAmount,
+// 				Status:    domain.TransactionStatusCompleted,
+// 				Reference: &gameBetRef,
+// 			}
+// 			if err := uc.transactionRepo.Create(ctx, tx, betTx); err != nil {
+// 				return
+// 			}
+// 		}
+
+// 		if _, err := uc.gameRepo.MarkUserCardsPaidTx(ctx, tx, gameID, userID); err != nil {
+// 			return
+// 		}
+// 		if bonusCards > 0 && bonusExpiry != nil {
+// 			if _, err := uc.gameRepo.MarkCardsBonusFundedTx(ctx, tx, gameID, userID, bonusCards, *bonusExpiry); err != nil {
+// 				return
+// 			}
+// 		}
+
+// 		paidUsers = append(paidUsers, paidUserSummary{
+// 			userID:    userID,
+// 			cardCount: count,
+// 		})
+// 	}
+
+// 	paidPlayers, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
+// 	if err != nil {
+// 		return
+// 	}
+// 	distinct := make(map[uuid.UUID]bool, len(paidPlayers))
+// 	for _, p := range paidPlayers {
+// 		distinct[p.UserID] = true
+// 	}
+// 	game.PlayerCount = len(distinct)
+// 	game.PrizePool = float64(len(paidPlayers)) * game.BetAmount * (1 - game.HouseCut)
+
+// 	if len(distinct) < domain.MinPlayers {
+// 		game.State = domain.GameStateWaiting
+// 		game.CountdownEnds = nil
+// 		if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
+// 			return
+// 		}
+// 		if err := tx.Commit(); err != nil {
+// 			return
+// 		}
+// 		uc.redisService.ClearCountdown(ctx, gameID)
+// 		for _, cardID := range droppedCards {
+// 			uc.redisService.RemoveTakenCard(ctx, gameID, cardID)
+// 		}
+// 		uc.redisService.SaveGameState(ctx, game)
+// 		uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventGameStatus, map[string]interface{}{
+// 			"status":       string(domain.GameStateWaiting),
+// 			"prize_pool":   game.PrizePool,
+// 			"player_count": game.PlayerCount,
+// 		})
+// 		return
+// 	}
+
+// 	game.State = domain.GameStateDrawing
+// 	now := time.Now()
+// 	game.StartedAt = &now
+// 	if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
+// 		return
+// 	}
+
+// 	// COMMIT THE GAME TRANSACTION FIRST
+// 	if err := tx.Commit(); err != nil {
+// 		return
+// 	}
+
+// 	// Clean Redis and update game status
+// 	for _, cardID := range droppedCards {
+// 		uc.redisService.RemoveTakenCard(ctx, gameID, cardID)
+// 	}
+// 	uc.redisService.SaveGameState(ctx, game)
+// 	uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventGameStatus, map[string]interface{}{
+// 		"status":       string(domain.GameStateDrawing),
+// 		"prize_pool":   game.PrizePool,
+// 		"player_count": game.PlayerCount,
+// 	})
+
+// 	// 1. Process Agent Commissions asynchronously (Safe & Isolated)
+// 	utils.GoSafe("processAgentCommissions", func() {
+// 		uc.processAgentCommissions(context.Background(), gameID, game.BetAmount, paidUsers)
+// 	})
+
+// 	// 2. Start drawing numbers periodically
+// 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
+// }
+
+
+
 // startDrawing charges all reservations, then transitions COUNTDOWN → DRAWING.
 func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	tx, err := uc.db.BeginTx(ctx, nil)
@@ -2706,8 +2891,11 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		return
 	}
 
+	// 1. Group ALL active cards by user (unpaid vs total)
 	unpaidByUser := map[uuid.UUID]int{}
+	cardCountByUser := map[uuid.UUID]int{}
 	for _, p := range active {
+		cardCountByUser[p.UserID]++
 		if !p.Paid {
 			unpaidByUser[p.UserID]++
 		}
@@ -2715,7 +2903,6 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 
 	gameBetRef := "GAME_BET"
 	var droppedCards []int
-	var paidUsers []paidUserSummary
 
 	for userID, count := range unpaidByUser {
 		wallet, err := uc.walletRepo.LockForUpdate(ctx, tx, userID)
@@ -2747,6 +2934,7 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 					droppedCards = append(droppedCards, p.CardID)
 				}
 			}
+			delete(cardCountByUser, userID) // Remove dropped player
 			continue
 		}
 
@@ -2760,6 +2948,7 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 			cashCards = count - bonusCards
 			cashCost = float64(cashCards) * game.BetAmount
 			if wallet.Balance < cashCost {
+				delete(cardCountByUser, userID)
 				return
 			}
 		}
@@ -2796,7 +2985,11 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 				return
 			}
 		}
+	}
 
+	// 2. Build the final paidUsers list from ALL remaining valid players
+	var paidUsers []paidUserSummary
+	for userID, count := range cardCountByUser {
 		paidUsers = append(paidUsers, paidUserSummary{
 			userID:    userID,
 			cardCount: count,
@@ -2859,7 +3052,7 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 		"player_count": game.PlayerCount,
 	})
 
-	// 1. Process Agent Commissions asynchronously (Safe & Isolated)
+	// 1. Process Agent Commissions asynchronously
 	utils.GoSafe("processAgentCommissions", func() {
 		uc.processAgentCommissions(context.Background(), gameID, game.BetAmount, paidUsers)
 	})
@@ -2867,6 +3060,57 @@ func (uc *GameUseCase) startDrawing(ctx context.Context, gameID uuid.UUID) {
 	// 2. Start drawing numbers periodically
 	utils.GoSafe("drawNumbers", func() { uc.drawNumbers(ctx, gameID) })
 }
+
+// Separate helper method to process agent commissions cleanly in its own transaction
+func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
+	for _, pu := range paidUsers {
+		var agentID uuid.UUID
+		var telegramID int64
+
+		err := uc.db.QueryRowContext(ctx, `
+			SELECT agent_id, telegram_id 
+			FROM users 
+			WHERE id = $1 AND agent_id IS NOT NULL`,
+			pu.userID,
+		).Scan(&agentID, &telegramID)
+
+		if err != nil || agentID == uuid.Nil {
+			continue // Player was not referred by an agent
+		}
+
+		commissionAmount := cardPrice * float64(pu.cardCount) * 0.02
+
+		tx, err := uc.db.BeginTx(ctx, nil)
+		if err != nil {
+			continue
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO agent_commissions (id, agent_id, player_id, game_id, amount, created_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+			agentID, telegramID, gameID.String(), commissionAmount,
+		)
+		if err != nil {
+			_ = tx.Rollback()
+			continue
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE agents 
+			SET balance = balance + $1 
+			WHERE id = $2`,
+			commissionAmount, agentID,
+		)
+		if err != nil {
+			_ = tx.Rollback()
+			continue
+		}
+
+		_ = tx.Commit()
+	}
+}
+
+
 
 // Separate helper method to process agent commissions cleanly in its own transaction
 func (uc *GameUseCase) processAgentCommissions(ctx context.Context, gameID uuid.UUID, cardPrice float64, paidUsers []paidUserSummary) {
