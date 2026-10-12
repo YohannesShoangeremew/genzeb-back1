@@ -29,7 +29,7 @@ const TotalCards = 500
 
 // MaxCardsPerPlayer is the maximum number of cards a single player may hold in
 // one game. Each card costs one full bet (e.g. 4 cards on a 10-birr table = 40).
-const MaxCardsPerPlayer = 4
+const MaxCardsPerPlayer = 8
 
 // MinWithdrawalAmount is the smallest withdrawal a player may request (birr).
 // Note this stacks with MinBalanceAfterWithdrawal below: a player needs at
