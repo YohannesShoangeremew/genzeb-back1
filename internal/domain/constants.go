@@ -102,11 +102,11 @@ const NumbersPerLetter = 15
 
 // Game Type Bet Amount Constants
 
-// BetAmountRegular is the bet amount for the standard game (10 birr)
-const BetAmountRegular = 10.0
+// BetAmountRegular is the bet amount for the standard game (50 birr)
+const BetAmountRegular = 50.0
 
-// BetAmountVIP is the bet amount for the VIP game (50 birr)
-const BetAmountVIP = 50.0
+// BetAmountVIP is the bet amount for the VIP game (200 birr)
+const BetAmountVIP = 200.0
 
 // WebSocket Event Name Constants
 
