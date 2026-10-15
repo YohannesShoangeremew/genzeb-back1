@@ -272,10 +272,10 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 	defer tx.Rollback()
 
 	// Resolve user referrals and agent referrals.
-	var referredBy *uuid.UUID
-	var agentID *uuid.UUID
+	//var referredBy *uuid.UUID
+	//var agentID *uuid.UUID
 
-	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+	//if code := strings.TrimSpace(req.ReferrerCode); code != "" {
 	// 	// Agent referral links
 	// 	if strings.HasPrefix(strings.ToUpper(code), "AG") {
 	// 		var aid uuid.UUID
