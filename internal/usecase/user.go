@@ -308,7 +308,6 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 	// 	}
 	// }
 
-
 // Resolve user referrals and agent referrals.
 	var referredBy *uuid.UUID
 	var agentID *uuid.UUID
