@@ -155,11 +155,12 @@ func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, er
 		refCode = fmt.Sprintf("REF%d", telegramID%1000000)
 	}
 
-	// 3. Insert the new agent record using the unified referral code
+	// 3. Insert the new agent record using the unified referral code thanks
 	insertQuery := `
 		INSERT INTO agents (telegram_id, referral_code, balance)
 		VALUES ($1, $2, 0.00)
 		RETURNING id, referral_code`
+
 
 	err = s.db.QueryRow(insertQuery, telegramID, refCode).Scan(&id, &refCode)
 	if err != nil {
