@@ -309,13 +309,12 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 	// }
 
 
-
-	// Resolve user referrals and agent referrals.
+// Resolve user referrals and agent referrals.
 	var referredBy *uuid.UUID
 	var agentID *uuid.UUID
 
 	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
-		// 1. Check if the code belongs to an active agent first
+		// 1. Check if the code belongs to an active agent
 		var aid uuid.UUID
 		err := tx.QueryRowContext(
 			ctx,
@@ -327,7 +326,7 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 			agentID = &aid
 			log.Printf("[agent] linked user %d to agent code %s", req.TelegramID, code)
 		} else {
-			// 2. Fall back to normal player referral links if not an agent code
+			// 2. Fall back to normal player referral links
 			if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
 				if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
 					log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
@@ -337,7 +336,6 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 			}
 		}
 	}
-
 	user := &domain.User{
 		TelegramID:  req.TelegramID,
 		FirstName:   req.FirstName,
