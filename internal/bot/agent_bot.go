@@ -98,13 +98,42 @@ func (s *AgentBotService) handleMessage(msg *tgbotapi.Message) {
 	}
 }
 
+// func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, error) {
+// 	var id, refCode string
+
+// 	// 1. Fetch existing agent
+// 	query := `SELECT id, referral_code FROM agents WHERE telegram_id = $1`
+// 	err := s.db.QueryRow(query, telegramID).Scan(&id, &refCode)
+
+// 	if err == nil {
+// 		return id, refCode, nil
+// 	}
+
+// 	if err != sql.ErrNoRows {
+// 		return "", "", err
+// 	}
+
+// 	// 2. Auto-generate referral code for new agent
+// 	refCode = fmt.Sprintf("AG%d", telegramID%1000000)
+// 	insertQuery := `
+// 		INSERT INTO agents (telegram_id, referral_code, balance)
+// 		VALUES ($1, $2, 0.00)
+// 		RETURNING id, referral_code`
+
+// 	err = s.db.QueryRow(insertQuery, telegramID, refCode).Scan(&id, &refCode)
+// 	if err != nil {
+// 		return "", "", err
+// 	}
+
+// 	return id, refCode, nil
+// }
+
 func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, error) {
 	var id, refCode string
 
-	// 1. Fetch existing agent
+	// 1. Fetch existing agent record
 	query := `SELECT id, referral_code FROM agents WHERE telegram_id = $1`
 	err := s.db.QueryRow(query, telegramID).Scan(&id, &refCode)
-
 	if err == nil {
 		return id, refCode, nil
 	}
@@ -113,8 +142,20 @@ func (s *AgentBotService) getOrCreateAgent(telegramID int64) (string, string, er
 		return "", "", err
 	}
 
-	// 2. Auto-generate referral code for new agent
-	refCode = fmt.Sprintf("AG%d", telegramID%1000000)
+	// 2. Try to fetch the referral code from the main users table 
+	// so agents share the exact same code they use as players.
+	var userRefCode sql.NullString
+	userQuery := `SELECT referral_code FROM users WHERE telegram_id = $1`
+	_ = s.db.QueryRow(userQuery, telegramID).Scan(&userRefCode)
+
+	if userRefCode.Valid && userRefCode.String != "" {
+		refCode = userRefCode.String
+	} else {
+		// Fallback if the user hasn't registered on the main bot yet
+		refCode = fmt.Sprintf("REF%d", telegramID%1000000)
+	}
+
+	// 3. Insert the new agent record using the unified referral code
 	insertQuery := `
 		INSERT INTO agents (telegram_id, referral_code, balance)
 		VALUES ($1, $2, 0.00)

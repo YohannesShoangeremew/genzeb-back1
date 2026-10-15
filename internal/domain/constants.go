@@ -189,7 +189,7 @@ const WebSocketInitialStateTimeout = 5 * time.Second
 // DefaultUserBalance is the welcome credit given to a new user's wallet on
 // signup. It must cover at least one regular game (BetAmountRegular) so a new
 // player can play immediately without depositing first.
-const DefaultUserBalance = 10.0
+const DefaultUserBalance = 50.0
 
 // DefaultMinDeposit is the fallback minimum deposit (birr) used when the
 // app_settings row is missing. The live value is editable from the admin page.
