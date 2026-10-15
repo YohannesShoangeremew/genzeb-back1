@@ -276,28 +276,58 @@ func (uc *UserUseCase) CreateUser(ctx context.Context, req domain.CreateUserRequ
 	var agentID *uuid.UUID
 
 	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
-		// Agent referral links
-		if strings.HasPrefix(strings.ToUpper(code), "AG") {
-			var aid uuid.UUID
-			err := tx.QueryRowContext(
-				ctx,
-				`
-				SELECT id
-				FROM agents
-				WHERE referral_code = $1
-				AND is_active = true
-				`,
-				code,
-			).Scan(&aid)
+	// 	// Agent referral links
+	// 	if strings.HasPrefix(strings.ToUpper(code), "AG") {
+	// 		var aid uuid.UUID
+	// 		err := tx.QueryRowContext(
+	// 			ctx,
+	// 			`
+	// 			SELECT id
+	// 			FROM agents
+	// 			WHERE referral_code = $1
+	// 			AND is_active = true
+	// 			`,
+	// 			code,
+	// 		).Scan(&aid)
 
-			if err == nil {
-				agentID = &aid
-				log.Printf("[agent] linked user %d to agent code %s", req.TelegramID, code)
-			} else {
-				log.Printf("[agent] failed to link user %d to agent code %s: %v", req.TelegramID, code, err)
-			}
+	// 		if err == nil {
+	// 			agentID = &aid
+	// 			log.Printf("[agent] linked user %d to agent code %s", req.TelegramID, code)
+	// 		} else {
+	// 			log.Printf("[agent] failed to link user %d to agent code %s: %v", req.TelegramID, code, err)
+	// 		}
+	// 	} else {
+	// 		// Normal player referral links
+	// 		if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
+	// 			if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
+	// 				log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
+	// 			} else {
+	// 				referredBy = &r.ID
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+
+
+	// Resolve user referrals and agent referrals.
+	var referredBy *uuid.UUID
+	var agentID *uuid.UUID
+
+	if code := strings.TrimSpace(req.ReferrerCode); code != "" {
+		// 1. Check if the code belongs to an active agent first
+		var aid uuid.UUID
+		err := tx.QueryRowContext(
+			ctx,
+			`SELECT id FROM agents WHERE referral_code = $1 AND is_active = true`,
+			code,
+		).Scan(&aid)
+
+		if err == nil && aid != uuid.Nil {
+			agentID = &aid
+			log.Printf("[agent] linked user %d to agent code %s", req.TelegramID, code)
 		} else {
-			// Normal player referral links
+			// 2. Fall back to normal player referral links if not an agent code
 			if r, rerr := uc.userRepo.FindByReferralCode(ctx, code); rerr == nil && r != nil {
 				if r.TelegramID == req.TelegramID || r.PhoneNumber == normalizedPhone {
 					log.Printf("[referral] ignoring self-referral by tg_id=%d", req.TelegramID)
