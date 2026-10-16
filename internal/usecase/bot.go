@@ -319,7 +319,7 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling (Optimized Bulk Join with Human Pacing) ----
+// ---- Filling (Optimized Bulk Join with Human Pacing & Smart Countdown) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false)
@@ -396,10 +396,10 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	}
 
 	// ---- HUMAN PACING CHUNK ----
-	// Limit how many cards join per tick to simulate natural human entry
+	// Small batch size (4 cards per tick) creates a natural trickle entry effect
 	maxPerTick := uc.settings.MaxJoinsPerTick
 	if maxPerTick <= 0 {
-		maxPerTick = 15 // Default batch size per sweep tick
+		maxPerTick = 4
 	}
 	if len(assignments) > maxPerTick {
 		assignments = assignments[:maxPerTick]
@@ -419,8 +419,6 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	if game.State != domain.GameStateWaiting && game.State != domain.GameStateCountdown {
 		return nil, errors.New("game is no longer accepting new players")
 	}
-
-	prevPlayerCount := game.PlayerCount
 
 	for _, asm := range assignments {
 		player := &domain.GamePlayer{
@@ -461,7 +459,15 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	}
 	uc.redisService.SaveGameState(ctx, game)
 
-	if game.State == domain.GameStateWaiting && prevPlayerCount < domain.MinPlayers && game.PlayerCount >= domain.MinPlayers {
+	// Fetch bot config to check target minimum room players
+	cfg, cfgErr := uc.botRepo.GetConfig(ctx)
+	targetPlayers := domain.MinPlayers
+	if cfgErr == nil && cfg != nil && cfg.MinimumRoomPlayers > 0 {
+		targetPlayers = cfg.MinimumRoomPlayers
+	}
+
+	// SMART COUNTDOWN TRIGGER: Only start countdown AFTER the room has filled to target capacity
+	if game.State == domain.GameStateWaiting && game.PlayerCount >= targetPlayers {
 		utils.GoSafe("startCountdown", func() { uc.gameUC.startCountdown(context.Background(), gameID) })
 	}
 
