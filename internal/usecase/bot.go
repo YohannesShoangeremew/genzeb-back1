@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -101,9 +102,7 @@ type BotSettings struct {
 }
 
 // BotUseCase seeds a pool of house-owned filler bots and joins them into games
-// that are short on real players. It reuses GameUseCase.JoinGame for every join,
-// so all wallet locking, prize-pool math and payout logic are unchanged — a bot
-// is just another player whose money belongs to the house.
+// that are short on real players.
 type BotUseCase struct {
 	botRepo         domain.BotRepository
 	userRepo        domain.UserRepository
@@ -143,12 +142,10 @@ func NewBotUseCase(
 
 // ---- Config passthrough (admin dashboard) ----
 
-// GetConfig returns the current auto-fill policy.
 func (uc *BotUseCase) GetConfig(ctx context.Context) (*domain.BotConfig, error) {
 	return uc.botRepo.GetConfig(ctx)
 }
 
-// UpdateConfig applies a partial policy update from the admin dashboard.
 func (uc *BotUseCase) UpdateConfig(ctx context.Context, req domain.UpdateBotConfigRequest) (*domain.BotConfig, error) {
 	cfg, err := uc.botRepo.GetConfig(ctx)
 	if err != nil {
@@ -206,8 +203,6 @@ func (uc *BotUseCase) UpdateConfig(ctx context.Context, req domain.UpdateBotConf
 
 // ---- Seeding ----
 
-// SeedPool ensures the bot pool exists, defaulting to the configured pool size
-// when count <= 0. Exposed to the admin dashboard.
 func (uc *BotUseCase) SeedPool(ctx context.Context, count int) error {
 	if count <= 0 {
 		count = uc.settings.PoolSize
@@ -215,8 +210,6 @@ func (uc *BotUseCase) SeedPool(ctx context.Context, count int) error {
 	return uc.EnsureBotPool(ctx, count)
 }
 
-// EnsureBotPool makes sure `size` bot accounts exist (idempotent) and tops each
-// bot wallet up to the configured float. Safe to call on every boot.
 func (uc *BotUseCase) EnsureBotPool(ctx context.Context, size int) error {
 	for i := 1; i <= size; i++ {
 		telegramID := int64(botTelegramIDBase - i)
@@ -236,7 +229,6 @@ func (uc *BotUseCase) EnsureBotPool(ctx context.Context, size int) error {
 	return nil
 }
 
-// createBot inserts one bot user + a funded wallet in a single transaction.
 func (uc *BotUseCase) createBot(ctx context.Context, index int, telegramID int64) error {
 	code, err := uc.uniqueReferralCode(ctx)
 	if err != nil {
@@ -326,7 +318,7 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling ----
+// ---- Filling (Optimized Bulk Join) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false)
@@ -356,7 +348,6 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return result, nil
 	}
 
-	// Track card counts per bot to allow up to maxCardsPerBot (5 cards) per bot user
 	botCardCounts, err := uc.botCardCountsInGame(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -371,14 +362,19 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return nil, err
 	}
 
+	type cardAssignment struct {
+		userID uuid.UUID
+		cardID int
+	}
+	var assignments []cardAssignment
+
 	added := 0
 	for _, bot := range bots {
 		if added >= requested || len(freeCards) == 0 {
 			break
 		}
 
-		// Allow each bot to take up to maxCardsPerBot (5 cards) in this game
-		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) > 0 {
+		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) == 0 == false && len(freeCards) > 0 {
 			if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
 				break
 			}
@@ -386,19 +382,92 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 			cardID := freeCards[len(freeCards)-1]
 			freeCards = freeCards[:len(freeCards)-1]
 
-			if _, err := uc.gameUC.JoinGame(ctx, gameID, domain.JoinGameRequest{UserID: bot.ID, CardID: cardID}); err != nil {
-				if err.Error() == "game is not accepting new players" {
-					break
-				}
-				break
-			}
+			assignments = append(assignments, cardAssignment{userID: bot.ID, cardID: cardID})
 			botCardCounts[bot.ID]++
 			added++
 		}
 	}
 
-	result.Added = added
-	result.BotPlayers = botPlayers + added
+	if len(assignments) == 0 {
+		result.Added = 0
+		result.BotPlayers = botPlayers
+		return result, nil
+	}
+
+	// ---- BULK TRANSACTION: Insert all bot cards in ONE atomic transaction ----
+	tx, err := uc.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin bulk join tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Lock the game row once for the entire batch
+	game, err = uc.gameRepo.LockForUpdate(ctx, tx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock game for bulk join: %w", err)
+	}
+	if game.State != domain.GameStateWaiting && game.State != domain.GameStateCountdown {
+		return nil, errors.New("game is no longer accepting new players")
+	}
+
+	prevPlayerCount := game.PlayerCount
+
+	// Insert all player assignments in the single transaction
+	for _, asm := range assignments {
+		player := &domain.GamePlayer{
+			ID:           uuid.New(),
+			GameID:       gameID,
+			UserID:       asm.userID,
+			CardID:       asm.cardID,
+			Paid:         false,
+			IsEliminated: false,
+		}
+		if err := uc.gameRepo.AddPlayer(ctx, tx, player); err != nil {
+			// Skip duplicate/taken card conflicts gracefully
+			continue
+		}
+	}
+
+	// Recompute active counters once from the transaction
+	active, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read active players: %w", err)
+	}
+	distinct := make(map[uuid.UUID]bool, len(active))
+	for _, p := range active {
+		distinct[p.UserID] = true
+	}
+	game.PlayerCount = len(distinct)
+	game.PrizePool = float64(len(active)) * game.BetAmount * (1 - game.HouseCut)
+
+	if err := uc.gameRepo.UpdateTx(ctx, tx, game); err != nil {
+		return nil, fmt.Errorf("failed to update game counters: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit bulk join tx: %w", err)
+	}
+
+	// Update Redis state in batch
+	for _, asm := range assignments {
+		uc.redisService.AddPlayer(ctx, gameID, asm.userID)
+		uc.redisService.AddTakenCard(ctx, gameID, asm.cardID)
+	}
+	uc.redisService.SaveGameState(ctx, game)
+
+	// Trigger countdown if player threshold is met
+	if game.State == domain.GameStateWaiting && prevPlayerCount < domain.MinPlayers && game.PlayerCount >= domain.MinPlayers {
+		utils.GoSafe("startCountdown", func() { uc.gameUC.startCountdown(context.Background(), gameID) })
+	}
+
+	// Publish update event
+	uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventPlayerJoined, map[string]interface{}{
+		"prize_pool":   game.PrizePool,
+		"player_count": game.PlayerCount,
+	})
+
+	result.Added = len(assignments)
+	result.BotPlayers = botPlayers + len(assignments)
 	return result, nil
 }
 
@@ -556,8 +625,6 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 				continue
 			}
 
-			// INSTANT FILL: Bypassed lobby breath delay and per-tick throttling 
-			// so bots fill rooms immediately at maximum speed.
 			need := desired - botPlayers
 			if _, err := uc.fill(ctx, game.ID, need, realPlayers == 0); err != nil {
 				continue
