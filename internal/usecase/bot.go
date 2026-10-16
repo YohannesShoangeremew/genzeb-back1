@@ -19,6 +19,7 @@ import (
 const (
 	botTelegramIDBase           = -1_000_000_000
 	highPopulationGuardBotCount = 2
+	maxCardsPerBot              = 2 // Allow each bot to hold up to 2 cards per game room
 )
 
 // botDisplayNames are Telegram-style display names used for house-controlled
@@ -190,8 +191,6 @@ func (uc *BotUseCase) UpdateConfig(ctx context.Context, req domain.UpdateBotConf
 		cfg.BiasedDrawMode = *req.BiasedDrawMode
 		cfg.BotAlwaysWin = cfg.BiasedDrawMode != domain.BiasedDrawModeDisabled
 	} else if req.BotAlwaysWin != nil {
-		// Backward compatibility for older admin clients that only know the
-		// boolean toggle. Enabling maps to the current protected policy.
 		cfg.BotAlwaysWin = *req.BotAlwaysWin
 		if cfg.BotAlwaysWin {
 			cfg.BiasedDrawMode = domain.BiasedDrawModeProtected
@@ -224,7 +223,6 @@ func (uc *BotUseCase) EnsureBotPool(ctx context.Context, size int) error {
 
 		existing, err := uc.userRepo.FindByTelegramID(ctx, telegramID)
 		if err == nil && existing != nil {
-			// Already seeded — just keep its wallet funded.
 			if ferr := uc.fundBotWallet(ctx, existing.ID); ferr != nil {
 				return fmt.Errorf("fund existing bot %d: %w", i, ferr)
 			}
@@ -272,7 +270,6 @@ func (uc *BotUseCase) createBot(ctx context.Context, index int, telegramID int64
 		return err
 	}
 
-	// Record the house money injected to bankroll this bot.
 	if err := uc.recordBotFunding(ctx, tx, user.ID, uc.settings.WalletFloat); err != nil {
 		return err
 	}
@@ -287,14 +284,12 @@ func (uc *BotUseCase) uniqueReferralCode(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("failed to generate referral code: %w", err)
 		}
 		if _, err := uc.userRepo.FindByReferralCode(ctx, code); err != nil {
-			return code, nil // not found → free to use
+			return code, nil
 		}
 	}
 	return "", fmt.Errorf("failed to generate unique referral code")
 }
 
-// fundBotWallet tops a bot wallet back up to the float if it has dropped below
-// it, recording the injected house money. No-op when already at/above float.
 func (uc *BotUseCase) fundBotWallet(ctx context.Context, userID uuid.UUID) error {
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -308,7 +303,7 @@ func (uc *BotUseCase) fundBotWallet(ctx context.Context, userID uuid.UUID) error
 	}
 	topUp := uc.settings.WalletFloat - wallet.Balance
 	if topUp <= 0 {
-		return tx.Commit() // already funded
+		return tx.Commit()
 	}
 	if err := uc.walletRepo.UpdateBalance(ctx, tx, userID, topUp); err != nil {
 		return err
@@ -333,20 +328,10 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 
 // ---- Filling ----
 
-// FillGame adds up to `requested` bots to one game, reusing JoinGame for each.
-// It enforces the core rule (never join a game with zero real players) and
-// respects free-card availability. Returns how many were actually added.
-//
-// This is the guarded, human-facing entry point (admin "add bots" button). The
-// automatic sweeper calls fill directly and may pass allowEmpty when policy
-// permits bot-only games — see sweep.
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false)
 }
 
-// fill is the shared implementation behind FillGame and the auto-sweeper. When
-// allowEmpty is false it keeps the classic guard (never seed a game with zero
-// real players); when true it may seed a bot-only game to keep the lobby alive.
 func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int, allowEmpty bool) (*domain.BotFillResult, error) {
 	game, err := uc.gameRepo.FindByID(ctx, gameID)
 	if err != nil {
@@ -367,14 +352,12 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 
 	result := &domain.BotFillResult{GameID: gameID, Requested: requested, RealPlayers: realPlayers, BotPlayers: botPlayers}
 
-	// Guard: never let bots play a game with no real player in it — unless the
-	// caller explicitly opted into bot-only games (allowEmpty).
 	if !allowEmpty && realPlayers < 1 {
 		return result, nil
 	}
 
-	// Which bots are already in this game, and which cards are taken.
-	inGame, err := uc.playersInGame(ctx, gameID)
+	// Track card counts per bot to allow up to maxCardsPerBot (2 cards) per bot user
+	botCardCounts, err := uc.botCardCountsInGame(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}
@@ -393,27 +376,25 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		if added >= requested || len(freeCards) == 0 {
 			break
 		}
-		if inGame[bot.ID] {
-			continue
-		}
 
-		// Ensure the bot can afford the stake; top up from the house if not.
-		if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
-			continue // skip this bot, try the next
-		}
-
-		cardID := freeCards[len(freeCards)-1]
-		freeCards = freeCards[:len(freeCards)-1]
-
-		if _, err := uc.gameUC.JoinGame(ctx, gameID, domain.JoinGameRequest{UserID: bot.ID, CardID: cardID}); err != nil {
-			// Card raced, game just started, etc. — stop if the game closed.
-			if err.Error() == "game is not accepting new players" {
+		// Allow each bot to take up to maxCardsPerBot (2 cards) in this game
+		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) > 0 {
+			if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
 				break
 			}
-			continue
+
+			cardID := freeCards[len(freeCards)-1]
+			freeCards = freeCards[:len(freeCards)-1]
+
+			if _, err := uc.gameUC.JoinGame(ctx, gameID, domain.JoinGameRequest{UserID: bot.ID, CardID: cardID}); err != nil {
+				if err.Error() == "game is not accepting new players" {
+					break
+				}
+				break
+			}
+			botCardCounts[bot.ID]++
+			added++
 		}
-		inGame[bot.ID] = true
-		added++
 	}
 
 	result.Added = added
@@ -421,9 +402,6 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	return result, nil
 }
 
-// ensureAffordable tops a bot wallet up to the float if it cannot cover a stake.
-// This is a best-effort pre-check; JoinGame re-verifies the balance under a row
-// lock, so a race here only means the join is skipped, never an overdraft.
 func (uc *BotUseCase) ensureAffordable(ctx context.Context, userID uuid.UUID, bet float64) error {
 	wallet, err := uc.walletRepo.FindByUserID(ctx, userID)
 	if err == nil && wallet.Balance >= bet {
@@ -432,16 +410,18 @@ func (uc *BotUseCase) ensureAffordable(ctx context.Context, userID uuid.UUID, be
 	return uc.fundBotWallet(ctx, userID)
 }
 
-func (uc *BotUseCase) playersInGame(ctx context.Context, gameID uuid.UUID) (map[uuid.UUID]bool, error) {
+func (uc *BotUseCase) botCardCountsInGame(ctx context.Context, gameID uuid.UUID) (map[uuid.UUID]int, error) {
 	players, err := uc.gameRepo.GetPlayers(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}
-	set := make(map[uuid.UUID]bool, len(players))
+	counts := make(map[uuid.UUID]int)
 	for _, p := range players {
-		set[p.UserID] = true
+		if p != nil && p.IsBot && !p.IsEliminated && p.LeftAt == nil {
+			counts[p.UserID]++
+		}
 	}
-	return set, nil
+	return counts, nil
 }
 
 func (uc *BotUseCase) freeCards(ctx context.Context, gameID uuid.UUID) ([]int, error) {
@@ -459,40 +439,21 @@ func (uc *BotUseCase) freeCards(ctx context.Context, gameID uuid.UUID) ([]int, e
 			free = append(free, c)
 		}
 	}
-	// Shuffle so bots don't always grab the same cards.
 	rand.Shuffle(len(free), func(i, j int) { free[i], free[j] = free[j], free[i] })
 	return free, nil
 }
 
 // ---- Auto-fill sweeper ----
 
-// joinDelayFor returns how long bots must hold off after the first real player
-// sat down in this game.
-//
-// Without it the sweeper fills the moment someone joins, so a player watches
-// five strangers appear within a second of picking their card — nobody arrives
-// that promptly, and it is the clearest tell that the room is padded.
-//
-// The wait is jittered per game rather than fixed, because "exactly N seconds,
-// every time" is itself a recognisable pattern to anyone who plays more than a
-// few rounds. The jitter is derived from the game id, so it is stable across
-// sweeps of the same game (the delay cannot wobble tick to tick) while
-// differing between games. Range is [delay, delay*1.5).
 func (uc *BotUseCase) joinDelayFor(gameID uuid.UUID) time.Duration {
 	base := uc.settings.JoinDelay
 	if base <= 0 {
 		return 0
 	}
-	spread := float64(gameID[0]) / 256.0 // 0.0 .. ~1.0, fixed per game
+	spread := float64(gameID[0]) / 256.0
 	return base + time.Duration(float64(base)*0.5*spread)
 }
 
-// desiredBotCount returns the exact number of bots a lobby should contain.
-// Below the configured room minimum, bots fill only the missing seats. At or
-// above the minimum, the saved winning policy is suspended; two guard bots are
-// retained only when a real player can fund a card with live bonus and that
-// saved policy is enabled. A disabled saved policy keeps the high-pop room fully
-// fair and bot-free.
 func desiredBotCount(realPlayers, minimumRoomPlayers int, hasSpendableBonus, savedPolicyEnabled bool) int {
 	if minimumRoomPlayers <= 0 {
 		return 0
@@ -506,10 +467,6 @@ func desiredBotCount(realPlayers, minimumRoomPlayers int, hasSpendableBonus, sav
 	return 0
 }
 
-// trimBots removes the most recently joined bots first until requested distinct
-// bot users have left. GameUseCase.LeaveGame owns the transaction, stake refund,
-// live counters, Redis card release, and room events, so dynamic trimming cannot
-// bypass the same invariants enforced for an ordinary leave.
 func (uc *BotUseCase) trimBots(ctx context.Context, gameID uuid.UUID, requested int) int {
 	if requested <= 0 {
 		return 0
@@ -553,9 +510,6 @@ func (uc *BotUseCase) trimBots(ctx context.Context, gameID uuid.UUID, requested 
 	return removed
 }
 
-// Run drives the automatic filler until ctx is cancelled. Every sweep
-// recalculates the desired bot count from the current number of real players, so
-// real arrivals replace bots and real departures are backfilled automatically.
 func (uc *BotUseCase) Run(ctx context.Context) {
 	ticker := time.NewTicker(uc.settings.CheckInterval)
 	defer ticker.Stop()
@@ -603,8 +557,6 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 				continue
 			}
 
-			// Real arrivals lower the target immediately. Removing the newest bots
-			// first preserves the least-recently-used rotation for the next room.
 			if botPlayers > desired {
 				uc.trimBots(ctx, game.ID, botPlayers-desired)
 				continue
@@ -613,8 +565,6 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 				continue
 			}
 
-			// Let a human-populated room breathe before the first automated arrival.
-			// Bot-only rooms are explicitly supported and seed without this delay.
 			if realPlayers > 0 {
 				if delay := uc.joinDelayFor(game.ID); delay > 0 {
 					age, hasReal, err := uc.botRepo.SecondsSinceFirstRealPlayer(ctx, game.ID)
