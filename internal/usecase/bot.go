@@ -12,6 +12,7 @@ import (
 	"github.com/bingo/backend/internal/domain"
 	redisGame "github.com/bingo/backend/pkg/redis"
 	"github.com/bingo/backend/pkg/referral"
+	utils "github.com/bingo/backend/pkg/utils"
 	"github.com/google/uuid"
 )
 
@@ -102,7 +103,6 @@ type BotSettings struct {
 }
 
 // BotUseCase seeds a pool of house-owned filler bots and joins them into games
-// that are short on real players.
 type BotUseCase struct {
 	botRepo         domain.BotRepository
 	userRepo        domain.UserRepository
@@ -110,7 +110,8 @@ type BotUseCase struct {
 	transactionRepo domain.TransactionRepository
 	gameRepo        domain.GameRepository
 	gameUC          *GameUseCase
-	gameState       *redisGame.GameStateService // reads the per-tier "recently browsed" marker
+	gameState       *redisGame.GameStateService
+	redisService    *redisGame.GameStateService
 	db              *sql.DB
 	settings        BotSettings
 }
@@ -135,6 +136,7 @@ func NewBotUseCase(
 		gameRepo:        gameRepo,
 		gameUC:          gameUC,
 		gameState:       gameState,
+		redisService:    gameState,
 		db:              db,
 		settings:        settings,
 	}
@@ -374,7 +376,7 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 			break
 		}
 
-		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) == 0 == false && len(freeCards) > 0 {
+		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) > 0 {
 			if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
 				break
 			}
@@ -401,7 +403,6 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	}
 	defer tx.Rollback()
 
-	// Lock the game row once for the entire batch
 	game, err = uc.gameRepo.LockForUpdate(ctx, tx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lock game for bulk join: %w", err)
@@ -412,7 +413,6 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 
 	prevPlayerCount := game.PlayerCount
 
-	// Insert all player assignments in the single transaction
 	for _, asm := range assignments {
 		player := &domain.GamePlayer{
 			ID:           uuid.New(),
@@ -423,12 +423,10 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 			IsEliminated: false,
 		}
 		if err := uc.gameRepo.AddPlayer(ctx, tx, player); err != nil {
-			// Skip duplicate/taken card conflicts gracefully
 			continue
 		}
 	}
 
-	// Recompute active counters once from the transaction
 	active, err := uc.gameRepo.GetActivePlayersTx(ctx, tx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read active players: %w", err)
@@ -448,19 +446,16 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return nil, fmt.Errorf("failed to commit bulk join tx: %w", err)
 	}
 
-	// Update Redis state in batch
 	for _, asm := range assignments {
 		uc.redisService.AddPlayer(ctx, gameID, asm.userID)
 		uc.redisService.AddTakenCard(ctx, gameID, asm.cardID)
 	}
 	uc.redisService.SaveGameState(ctx, game)
 
-	// Trigger countdown if player threshold is met
 	if game.State == domain.GameStateWaiting && prevPlayerCount < domain.MinPlayers && game.PlayerCount >= domain.MinPlayers {
 		utils.GoSafe("startCountdown", func() { uc.gameUC.startCountdown(context.Background(), gameID) })
 	}
 
-	// Publish update event
 	uc.redisService.PublishEvent(ctx, gameID, domain.WebSocketEventPlayerJoined, map[string]interface{}{
 		"prize_pool":   game.PrizePool,
 		"player_count": game.PlayerCount,
