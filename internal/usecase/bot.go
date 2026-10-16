@@ -19,7 +19,7 @@ import (
 const (
 	botTelegramIDBase           = -1_000_000_000
 	highPopulationGuardBotCount = 2
-	maxCardsPerBot              = 2 // Allow each bot to hold up to 2 cards per game room
+	maxCardsPerBot              = 5 // Allow each bot to hold up to 2 cards per game room
 )
 
 // botDisplayNames are Telegram-style display names used for house-controlled
