@@ -25,7 +25,7 @@ const (
 )
 
 // botDisplayNames are Telegram-style display names used for house-controlled
-// filler bots, updated with your preferred clean list.
+// filler bots, matching your clean list.
 var botDisplayNames = []string{
 	"Natiye", "beki", "B", "bekaaaaaaaaa", "Solitude",
 	"Godsproperty", "maki", "Beka", "Kiya", "Babi",
@@ -317,13 +317,14 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling (Optimized Bulk Join with Human Pacing & Standard Countdown) ----
+// ---- Filling (Optimized Bulk Join with Admin Control & Pacing) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
-	return uc.fill(ctx, gameID, requested, false)
+	// Manual admin fill: bypass MaxJoinsPerTick throttling so admin requests fulfill immediately
+	return uc.fill(ctx, gameID, requested, false, false)
 }
 
-func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int, allowEmpty bool) (*domain.BotFillResult, error) {
+func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int, allowEmpty bool, applyPacing bool) (*domain.BotFillResult, error) {
 	game, err := uc.gameRepo.FindByID(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("game not found: %w", err)
@@ -393,12 +394,12 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return result, nil
 	}
 
-	// Respect admin panel MaxJoinsPerTick configuration strictly for organic human pacing
-	if uc.settings.MaxJoinsPerTick > 0 && len(assignments) > uc.settings.MaxJoinsPerTick {
+	// Apply MaxJoinsPerTick pacing ONLY when requested by the automatic background sweeper
+	if applyPacing && uc.settings.MaxJoinsPerTick > 0 && len(assignments) > uc.settings.MaxJoinsPerTick {
 		assignments = assignments[:uc.settings.MaxJoinsPerTick]
 	}
 
-	// ---- BULK TRANSACTION: Insert this paced batch atomically ----
+	// ---- BULK TRANSACTION: Insert this batch atomically ----
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin bulk join tx: %w", err)
@@ -642,7 +643,8 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 			}
 
 			need := desired - botPlayers
-			if _, err := uc.fill(ctx, game.ID, need, realPlayers == 0); err != nil {
+			// Sweeper fill applies pacing
+			if _, err := uc.fill(ctx, game.ID, need, realPlayers == 0, true); err != nil {
 				continue
 			}
 		}
