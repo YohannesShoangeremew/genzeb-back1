@@ -27,69 +27,68 @@ const (
 // botDisplayNames are Telegram-style display names used for house-controlled
 // filler bots. They intentionally mirror the mixed formatting real Telegram
 // users often choose, because these names are visible in winner overlays and
-// recent-winner feeds. Keep this list in sync with migration
-// 048_bot_telegram_display_names.sql so existing and newly seeded bots match.
+// recent-winner feeds.
 var botDisplayNames = []string{
-    "Natiye", "beki", "B", "bekaaaaaaaaa", "Solitude",
-    "Godsproperty", "maki", "Beka", "Kiya", "Babi",
-    "Yadi", "TemesgenYa", "N", "natiiii", "Eclipse",
-    "YaAllah", "Moges", "Micky", "Mack", "Abela",
-    "Fikir", "yabs", "Elsa", "edu", "Peace",
-    "His", "B", "Abet", "Noah", "Kikiyeee",
-    "Abi", "makgreat", "J", "hanicho", "Chaos",
-    "Grace", "Ghosttt", "Tew", "Beka", "Mimi",
-    "habib", "eduta", "K", "yabsss", "Loner",
-    "Amen", "Edu", "Min", "Sami", "Nani",
-    "Mela", "hani", "D", "sammyy", "Vibes",
-    "Chosen", "Kira", "Awo", "Nati", "Tuti",
-    "Tseda", "sami", "M", "makkk", "Aura",
-    "Gospel", "yabs", "Ishi", "Hani", "Jiji",
-    "Beki", "beti", "H", "abiii", "Moonchild",
-    "Jesus", "miki", "Kiya", "Edu", "Fifi",
-    "Robi", "chala", "Y", "fikirrr", "Soul",
-    "Faith", "hani", "Ere", "Yoni", "Chuchu",
-    "Daveeeeee", "muni", "elias", "lilii", "Broken",
-    "Marys", "beti", "Gida", "Dani", "Didi",
-    "Yoni", "nami", "A", "danii", "Faded",
-    "Alhamdulillah", "jo", "Ebak", "Fikir", "Bobo",
-    "Kaleb", "rozi", "T", "robb", "Ghost",
-    "Sabr", "solo", "Tik", "Selam", "Mamo",
-    "Fema", "meron", "R", "jerryy", "Silence",
-    "Tawakkul", "ezi", "Fen", "Tsega", "Jojo",
-    "ezra", "yerus", "L", "tutuu", "Empty",
-    "Blessed", "dan", "Lemen", "Geta", "Nono",
-    "Bruk", "mina", "P", "eziii", "Void",
-    "Redeemed", "rob", "Man", "Rahmet", "Pipi",
-    "Safi", "tsed", "C", "fiooo", "Nothing",
-    "Saved", "fik", "Hul", "Juma", "Toto",
-    "Elu", "yofe", "V", "soll", "Shadow",
-    "Holy", "lid", "Chil", "Hiwot", "Lolo",
-    "Jeri", "abi", "Z", "babb", "Bliss",
-    "Pray", "na", "Wey", "Tesfa", "Yoyo",
-    "Redi", "meze", "G", "garii", "Serenity",
-    "Lord", "kal", "Ged", "Birhan", "Gogo",
-    "Bogi", "zed", "F", "noahh", "Lost",
-    "Christ", "bru", "Zim", "Kal", "Shushu",
-    "Miki", "jappy", "T", "sidd", "Tired",
-    "Saint", "sel", "Besm", "Emnet", "Kuku",
-    "Seli", "lela", "W", "yemii", "Enigma",
-    "Peace", "mel", "Kef", "Tsehay", "Maca",
-    "Lina", "eba", "Q", "farr", "Abyss",
-    "Mercy", "Fitse", "Are", "Chereka", "Papa",
-    "Miky", "tofik", "X", "AB", "Mirage",
-    "Heaven", "Abenezer", "Dagmawi", "Kiyaye", "Daniel",
-    "dagi", "jossi", "Kirubel", "kiraa", "Echo",
-    "Angel", "Father", "Ende", "Semay", "Coco",
-    "Fasilo", "Yichalal", "Demelash", "lderu", "Chill",
-    "Prophet", "Dereje", "Dere", "Midir", "Zizu",
-    "Hena", "hiwi", "User", "titi", "Dawn",
-    "Nour", "Bomb", "Tel", "Zimta", "Ririfikir",
-    "Amu", "mack", "U", "Timiro", "Dusk",
-    "Deen", "Bella", "ErmiyasAsa", "Ewnet", "Davinchi",
-    "YonasG", "yordi", "K", "mariiii", "Luna",
-    "Glory", "Goytom", "Abrish", "Sewmalet", "Meseret",
-    "Abdulselam", "Abdi", "Kedir", "babyyyy", "Starboy",
-    "MyLove", "Yabsera", "Faya", "Nuro", "ElaBest",
+	"Natiye", "beki", "B", "bekaaaaaaaaa", "Solitude",
+	"Godsproperty", "maki", "Beka", "Kiya", "Babi",
+	"Yadi", "TemesgenYa", "N", "natiiii", "Eclipse",
+	"YaAllah", "Moges", "Micky", "Mack", "Abela",
+	"Fikir", "yabs", "Elsa", "edu", "Peace",
+	"His", "B", "Abet", "Noah", "Kikiyeee",
+	"Abi", "makgreat", "J", "hanicho", "Chaos",
+	"Grace", "Ghosttt", "Tew", "Beka", "Mimi",
+	"habib", "eduta", "K", "yabsss", "Loner",
+	"Amen", "Edu", "Min", "Sami", "Nani",
+	"Mela", "hani", "D", "sammyy", "Vibes",
+	"Chosen", "Kira", "Awo", "Nati", "Tuti",
+	"Tseda", "sami", "M", "makkk", "Aura",
+	"Gospel", "yabs", "Ishi", "Hani", "Jiji",
+	"Beki", "beti", "H", "abiii", "Moonchild",
+	"Jesus", "miki", "Kiya", "Edu", "Fifi",
+	"Robi", "chala", "Y", "fikirrr", "Soul",
+	"Faith", "hani", "Ere", "Yoni", "Chuchu",
+	"Daveeeeee", "muni", "elias", "lilii", "Broken",
+	"Marys", "beti", "Gida", "Dani", "Didi",
+	"Yoni", "nami", "A", "danii", "Faded",
+	"Alhamdulillah", "jo", "Ebak", "Fikir", "Bobo",
+	"Kaleb", "rozi", "T", "robb", "Ghost",
+	"Sabr", "solo", "Tik", "Selam", "Mamo",
+	"Fema", "meron", "R", "jerryy", "Silence",
+	"Tawakkul", "ezi", "Fen", "Tsega", "Jojo",
+	"ezra", "yerus", "L", "tutuu", "Empty",
+	"Blessed", "dan", "Lemen", "Geta", "Nono",
+	"Bruk", "mina", "P", "eziii", "Void",
+	"Redeemed", "rob", "Man", "Rahmet", "Pipi",
+	"Safi", "tsed", "C", "fiooo", "Nothing",
+	"Saved", "fik", "Hul", "Juma", "Toto",
+	"Elu", "yofe", "V", "soll", "Shadow",
+	"Holy", "lid", "Chil", "Hiwot", "Lolo",
+	"Jeri", "abi", "Z", "babb", "Bliss",
+	"Pray", "na", "Wey", "Tesfa", "Yoyo",
+	"Redi", "meze", "G", "garii", "Serenity",
+	"Lord", "kal", "Ged", "Birhan", "Gogo",
+	"Bogi", "zed", "F", "noahh", "Lost",
+	"Christ", "bru", "Zim", "Kal", "Shushu",
+	"Miki", "jappy", "T", "sidd", "Tired",
+	"Saint", "sel", "Besm", "Emnet", "Kuku",
+	"Seli", "lela", "W", "yemii", "Enigma",
+	"Peace", "mel", "Kef", "Tsehay", "Maca",
+	"Lina", "eba", "Q", "farr", "Abyss",
+	"Mercy", "Fitse", "Are", "Chereka", "Papa",
+	"Miky", "tofik", "X", "AB", "Mirage",
+	"Heaven", "Abenezer", "Dagmawi", "Kiyaye", "Daniel",
+	"dagi", "jossi", "Kirubel", "kiraa", "Echo",
+	"Angel", "Father", "Ende", "Semay", "Coco",
+	"Fasilo", "Yichalal", "Demelash", "lderu", "Chill",
+	"Prophet", "Dereje", "Dere", "Midir", "Zizu",
+	"Hena", "hiwi", "User", "titi", "Dawn",
+	"Nour", "Bomb", "Tel", "Zimta", "Ririfikir",
+	"Amu", "mack", "U", "Timiro", "Dusk",
+	"Deen", "Bella", "ErmiyasAsa", "Ewnet", "Davinchi",
+	"YonasG", "yordi", "K", "mariiii", "Luna",
+	"Glory", "Goytom", "Abrish", "Sewmalet", "Meseret",
+	"Abdulselam", "Abdi", "Kedir", "babyyyy", "Starboy",
+	"MyLove", "Yabsera", "Faya", "Nuro", "ElaBest",
 }
 
 // BotSettings holds the operator-tunable knobs supplied from config/env.
@@ -320,7 +319,7 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling (Optimized Bulk Join) ----
+// ---- Filling (Optimized Bulk Join with Human Pacing) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false)
@@ -396,7 +395,17 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return result, nil
 	}
 
-	// ---- BULK TRANSACTION: Insert all bot cards in ONE atomic transaction ----
+	// ---- HUMAN PACING CHUNK ----
+	// Limit how many cards join per tick to simulate natural human entry
+	maxPerTick := uc.settings.MaxJoinsPerTick
+	if maxPerTick <= 0 {
+		maxPerTick = 15 // Default batch size per sweep tick
+	}
+	if len(assignments) > maxPerTick {
+		assignments = assignments[:maxPerTick]
+	}
+
+	// ---- BULK TRANSACTION: Insert this batch atomically ----
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin bulk join tx: %w", err)
