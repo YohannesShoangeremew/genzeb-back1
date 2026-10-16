@@ -19,7 +19,7 @@ import (
 const (
 	botTelegramIDBase           = -1_000_000_000
 	highPopulationGuardBotCount = 2
-	maxCardsPerBot              = 5 // Allow each bot to hold up to 2 cards per game room
+	maxCardsPerBot              = 5 // Allow each bot to hold up to 5 cards per game room
 )
 
 // botDisplayNames are Telegram-style display names used for house-controlled
@@ -356,7 +356,7 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return result, nil
 	}
 
-	// Track card counts per bot to allow up to maxCardsPerBot (2 cards) per bot user
+	// Track card counts per bot to allow up to maxCardsPerBot (5 cards) per bot user
 	botCardCounts, err := uc.botCardCountsInGame(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -377,7 +377,7 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 			break
 		}
 
-		// Allow each bot to take up to maxCardsPerBot (2 cards) in this game
+		// Allow each bot to take up to maxCardsPerBot (5 cards) in this game
 		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) > 0 {
 			if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
 				break
@@ -444,15 +444,6 @@ func (uc *BotUseCase) freeCards(ctx context.Context, gameID uuid.UUID) ([]int, e
 }
 
 // ---- Auto-fill sweeper ----
-
-func (uc *BotUseCase) joinDelayFor(gameID uuid.UUID) time.Duration {
-	base := uc.settings.JoinDelay
-	if base <= 0 {
-		return 0
-	}
-	spread := float64(gameID[0]) / 256.0
-	return base + time.Duration(float64(base)*0.5*spread)
-}
 
 func desiredBotCount(realPlayers, minimumRoomPlayers int, hasSpendableBonus, savedPolicyEnabled bool) int {
 	if minimumRoomPlayers <= 0 {
@@ -565,19 +556,9 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 				continue
 			}
 
-			if realPlayers > 0 {
-				if delay := uc.joinDelayFor(game.ID); delay > 0 {
-					age, hasReal, err := uc.botRepo.SecondsSinceFirstRealPlayer(ctx, game.ID)
-					if err != nil || !hasReal || time.Duration(age*float64(time.Second)) < delay {
-						continue
-					}
-				}
-			}
-
+			// INSTANT FILL: Bypassed lobby breath delay and per-tick throttling 
+			// so bots fill rooms immediately at maximum speed.
 			need := desired - botPlayers
-			if uc.settings.MaxJoinsPerTick > 0 && need > uc.settings.MaxJoinsPerTick {
-				need = uc.settings.MaxJoinsPerTick
-			}
 			if _, err := uc.fill(ctx, game.ID, need, realPlayers == 0); err != nil {
 				continue
 			}
