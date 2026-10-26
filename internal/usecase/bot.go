@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/bingo/backend/internal/domain"
@@ -22,7 +21,6 @@ import (
 const (
 	botTelegramIDBase           = -1_000_000_000
 	highPopulationGuardBotCount = 2
-	maxCardsPerBot              = 3 // Bot card density per room
 )
 
 // botDisplayNames are Telegram-style display names used for house-controlled filler bots.
@@ -335,7 +333,7 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling (Optimized Bulk Join with Multi-Row SQL Insert & Conflict Handling) ----
+// ---- Filling (Strict 1-Card-Per-Bot Join with Atomic Transaction Safeguards) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false, false)
@@ -365,10 +363,12 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		return result, nil
 	}
 
-	botCardCounts, err := uc.botCardCountsInGame(ctx, gameID)
+	// Fetch current bots already participating in this game so we don't assign them a duplicate card
+	activeBotIDs, err := uc.activeBotIDsInGame(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}
+
 	freeCards, err := uc.freeCards(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -389,24 +389,26 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	}
 	var assignments []cardAssignment
 
+	// Select unique bots that do NOT already hold a card in this game (Strict 1 Card per Bot rule)
 	added := 0
 	for _, bot := range bots {
 		if added >= requested || len(freeCards) == 0 {
 			break
 		}
-
-		for botCardCounts[bot.ID] < maxCardsPerBot && added < requested && len(freeCards) > 0 {
-			if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
-				break
-			}
-
-			cardID := freeCards[len(freeCards)-1]
-			freeCards = freeCards[:len(freeCards)-1]
-
-			assignments = append(assignments, cardAssignment{userID: bot.ID, cardID: cardID})
-			botCardCounts[bot.ID]++
-			added++
+		if activeBotIDs[bot.ID] {
+			continue // Bot already has a card in this room, skip to avoid double-carding
 		}
+
+		if err := uc.ensureAffordable(ctx, bot.ID, game.BetAmount); err != nil {
+			continue
+		}
+
+		cardID := freeCards[len(freeCards)-1]
+		freeCards = freeCards[:len(freeCards)-1]
+
+		assignments = append(assignments, cardAssignment{userID: bot.ID, cardID: cardID})
+		activeBotIDs[bot.ID] = true // Mark as used for this fill round
+		added++
 	}
 
 	if len(assignments) == 0 {
@@ -419,42 +421,39 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		assignments = assignments[:uc.settings.MaxJoinsPerTick]
 	}
 
-	// ---- BULK TRANSACTION & MULTI-ROW SQL INSERT WITH ON CONFLICT DO NOTHING ----
+	// ---- TRANSACTION & ATOMIC INSERTION WITH CONFLICT VALIDATION ----
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin bulk join tx: %w", err)
+		return nil, fmt.Errorf("failed to begin bot join tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	game, err = uc.gameRepo.LockForUpdate(ctx, tx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to lock game for bulk join: %w", err)
+		return nil, fmt.Errorf("failed to lock game for bot join: %w", err)
 	}
 	if game.State != domain.GameStateWaiting && game.State != domain.GameStateCountdown {
 		return nil, errors.New("game is no longer accepting new players")
 	}
 
 	prevPlayerCount := game.PlayerCount
+	var successfulAssignments []cardAssignment
 
-	if len(assignments) > 0 {
-		var qBuilder strings.Builder
-		qBuilder.Grow(len(assignments) * 90)
-		qBuilder.WriteString(`INSERT INTO game_players (id, game_id, user_id, card_id, paid, is_eliminated, joined_at) VALUES `)
-
-		args := make([]interface{}, 0, len(assignments)*6)
-		for i, asm := range assignments {
-			if i > 0 {
-				qBuilder.WriteString(",")
-			}
-			baseIdx := i * 6
-			qBuilder.WriteString(fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, NOW())", baseIdx+1, baseIdx+2, baseIdx+3, baseIdx+4, baseIdx+5, baseIdx+6))
-			args = append(args, uuid.New(), gameID, asm.userID, asm.cardID, false, false)
+	// Insert each bot card assignment safely, ignoring race collisions
+	for _, asm := range assignments {
+		playerID := uuid.New()
+		insertQuery := `
+			INSERT INTO game_players (id, game_id, user_id, card_id, paid, is_eliminated, joined_at)
+			VALUES ($1, $2, $3, $4, $5, $6, NOW())
+			ON CONFLICT (game_id, card_id) WHERE left_at IS NULL DO NOTHING
+		`
+		res, err := tx.ExecContext(ctx, insertQuery, playerID, gameID, asm.userID, asm.cardID, false, false)
+		if err != nil {
+			continue
 		}
-
-		qBuilder.WriteString(` ON CONFLICT DO NOTHING`)
-
-		if _, err := tx.ExecContext(ctx, qBuilder.String(), args...); err != nil {
-			return nil, fmt.Errorf("failed to execute multi-row bot insert: %w", err)
+		rowsAff, _ := res.RowsAffected()
+		if rowsAff > 0 {
+			successfulAssignments = append(successfulAssignments, asm)
 		}
 	}
 
@@ -474,10 +473,11 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit bulk join tx: %w", err)
+		return nil, fmt.Errorf("failed to commit bot join tx: %w", err)
 	}
 
-	for _, asm := range assignments {
+	// Sync Redis strictly for successfully committed bot assignments
+	for _, asm := range successfulAssignments {
 		uc.redisService.AddPlayer(ctx, gameID, asm.userID)
 		uc.redisService.AddTakenCard(ctx, gameID, asm.cardID)
 	}
@@ -492,8 +492,8 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		"player_count": game.PlayerCount,
 	})
 
-	result.Added = len(assignments)
-	result.BotPlayers = botPlayers + len(assignments)
+	result.Added = len(successfulAssignments)
+	result.BotPlayers = botPlayers + len(successfulAssignments)
 	return result, nil
 }
 
@@ -505,18 +505,18 @@ func (uc *BotUseCase) ensureAffordable(ctx context.Context, userID uuid.UUID, be
 	return uc.fundBotWallet(ctx, userID)
 }
 
-func (uc *BotUseCase) botCardCountsInGame(ctx context.Context, gameID uuid.UUID) (map[uuid.UUID]int, error) {
+func (uc *BotUseCase) activeBotIDsInGame(ctx context.Context, gameID uuid.UUID) (map[uuid.UUID]bool, error) {
 	players, err := uc.gameRepo.GetPlayers(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}
-	counts := make(map[uuid.UUID]int)
+	botIDs := make(map[uuid.UUID]bool)
 	for _, p := range players {
 		if p != nil && p.IsBot && !p.IsEliminated && p.LeftAt == nil {
-			counts[p.UserID]++
+			botIDs[p.UserID] = true
 		}
 	}
-	return counts, nil
+	return botIDs, nil
 }
 
 func (uc *BotUseCase) freeCards(ctx context.Context, gameID uuid.UUID) ([]int, error) {
@@ -565,21 +565,7 @@ func getShiftMultiplier() float64 {
 	}
 
 	multipliers := []float64{
-		0.9,  // Shift 1:  00:00 - 01:36
-		0.8,  // Shift 2:  01:36 - 03:12
-		0.3,  // Shift 3:  03:12 - 04:48
-		0.3,  // Shift 4:  04:48 - 06:24
-		0.5,  // Shift 5:  06:24 - 08:00
-		0.6,  // Shift 6:  08:00 - 09:36
-		0.9,  // Shift 7:  09:36 - 11:12
-		1.0,  // Shift 8:  11:12 - 12:48
-		1.2,  // Shift 9:  12:48 - 14:24
-		1.3,  // Shift 10: 14:24 - 16:00
-		1.3,  // Shift 11: 16:00 - 17:36
-		1.3,  // Shift 12: 17:36 - 19:12
-		1.3,  // Shift 13: 19:12 - 20:48
-		1.3,  // Shift 14: 20:48 - 22:24
-		1.3,  // Shift 15: 22:24 - 23:59
+		0.9, 0.8, 0.3, 0.3, 0.5, 0.6, 0.9, 1.0, 1.2, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3,
 	}
 
 	return multipliers[shiftIndex]
@@ -673,7 +659,7 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 		minRoomPlayers = domain.MinPlayers
 	}
 
-    savedPolicyEnabled := cfg.EffectiveBiasedDrawMode() != domain.BiasedDrawModeDisabled
+	savedPolicyEnabled := cfg.EffectiveBiasedDrawMode() != domain.BiasedDrawModeDisabled
 	for _, tier := range cfg.TierList() {
 		t := tier
 		games, err := uc.gameRepo.FindAvailable(ctx, &t, domain.MaxAvailableGamesLimit)
