@@ -335,7 +335,7 @@ func (uc *BotUseCase) recordBotFunding(ctx context.Context, tx *sql.Tx, userID u
 	})
 }
 
-// ---- Filling (Optimized Bulk Join with Multi-Row SQL Insert) ----
+// ---- Filling (Optimized Bulk Join with Multi-Row SQL Insert & Conflict Handling) ----
 
 func (uc *BotUseCase) FillGame(ctx context.Context, gameID uuid.UUID, requested int) (*domain.BotFillResult, error) {
 	return uc.fill(ctx, gameID, requested, false, false)
@@ -419,7 +419,7 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 		assignments = assignments[:uc.settings.MaxJoinsPerTick]
 	}
 
-	// ---- BULK TRANSACTION & MULTI-ROW SQL INSERT ----
+	// ---- BULK TRANSACTION & MULTI-ROW SQL INSERT WITH ON CONFLICT DO NOTHING ----
 	tx, err := uc.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin bulk join tx: %w", err)
@@ -436,21 +436,22 @@ func (uc *BotUseCase) fill(ctx context.Context, gameID uuid.UUID, requested int,
 
 	prevPlayerCount := game.PlayerCount
 
-	// Construct single multi-row INSERT query for all bot card assignments
 	if len(assignments) > 0 {
 		var qBuilder strings.Builder
-		qBuilder.Grow(len(assignments) * 80)
+		qBuilder.Grow(len(assignments) * 90)
 		qBuilder.WriteString(`INSERT INTO game_players (id, game_id, user_id, card_id, paid, is_eliminated, joined_at) VALUES `)
 
-		args := make([]interface{}, 0, len(assignments)*7)
+		args := make([]interface{}, 0, len(assignments)*6)
 		for i, asm := range assignments {
 			if i > 0 {
 				qBuilder.WriteString(",")
 			}
-			baseIdx := i * 7
+			baseIdx := i * 6
 			qBuilder.WriteString(fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, NOW())", baseIdx+1, baseIdx+2, baseIdx+3, baseIdx+4, baseIdx+5, baseIdx+6))
 			args = append(args, uuid.New(), gameID, asm.userID, asm.cardID, false, false)
 		}
+
+		qBuilder.WriteString(` ON CONFLICT DO NOTHING`)
 
 		if _, err := tx.ExecContext(ctx, qBuilder.String(), args...); err != nil {
 			return nil, fmt.Errorf("failed to execute multi-row bot insert: %w", err)
@@ -672,7 +673,7 @@ func (uc *BotUseCase) sweep(ctx context.Context) {
 		minRoomPlayers = domain.MinPlayers
 	}
 
-	savedPolicyEnabled := cfg.EffectiveBiasedDrawMode() != domain.BiasedDrawModeDisabled
+    savedPolicyEnabled := cfg.EffectiveBiasedDrawMode() != domain.BiasedDrawModeDisabled
 	for _, tier := range cfg.TierList() {
 		t := tier
 		games, err := uc.gameRepo.FindAvailable(ctx, &t, domain.MaxAvailableGamesLimit)
